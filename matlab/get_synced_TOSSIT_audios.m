@@ -9,11 +9,15 @@ close all
 % root containing folder with data from each TOSSIT
 base_dir = "/media/markgoldwater/Elements/cape_cod_bay/acoustics/";
 % location of source wav file where a signal of interest was identified
-source_file = fullfile(base_dir, "/6468/6468.220323121726.wav");
+% source_file = fullfile(base_dir, "6470/6470.220407001558.wav");
+% % timestamp in the source file
+% timestamp = 37955; % [sec]
+source_file = fullfile(base_dir, "6470/6470.220407001558.wav");
 % timestamp in the source file
-timestamp = 1343; % [sec]
+timestamp = 37995; % [sec]
 % control how much to the left and right of timestamp is saved
-window_delta = 5; % [sec]
+window_delta = 80; % [sec]
+window_delta_source = 80; % [sec]
 % sample rate of data
 fs = 24000; % [Hz]
 % desired sample rate to save
@@ -27,7 +31,7 @@ TOSSIT_id = split_path(end-2);
 source_file_num = split_path(end-1);
 
 % get sample from source file
-[y, fs_file] = audioread(source_file,[fs*(timestamp - window_delta), fs*(timestamp + window_delta)]);
+[y, fs_file] = audioread(source_file,[fs*(timestamp - window_delta_source), fs*(timestamp + window_delta_source)]);
 assert(fs == fs_file, "sampling frequency from file does not match expected");
 result.source = resample(y, fs_desired, fs);
 result.fs = fs_desired;
@@ -84,32 +88,73 @@ for j = 1:length(closest_xml_list)
     clear y fs_file
 end
 
-%% PLOT RESULTS
+%% PLOT RAW RESULTS
 
 % plot spectrograms of results
-Nw = 60;
+Nw = 45;
 noverlap = Nw-8;
-nfft = 736;
+nfft = 1012;
 
 figure;
 [stft,f,t] = spectrogram(result.source,Nw,noverlap,nfft,result.fs);
 subplot(5,1,1)
 imagesc(t,f,10*log10(abs(stft).^2))
+colormap('turbo')
 axis xy
 xlabel("Time [s]")
 ylabel("Frequency [Hz]")
 title("TOSSIT " + TOSSIT_id + " (source)")
 
-
 for c = 1:length(TOSSIT_id_list)
     subplot(5,1,c+1)
     [stft,f,t] = spectrogram(result.("TOSSIT" + TOSSIT_id_list(c)),Nw,noverlap,nfft,result.fs);
     imagesc(t,f,10*log10(abs(stft).^2))
+    colormap('turbo')
     axis xy
     xlabel("Time [s]")
     ylabel("Frequency [Hz]")
     title("TOSSIT " + TOSSIT_id_list(c))
 end
+
+sgt = sgtitle("Rough Synchronize");
+sgt.FontSize = 30;
+
+%% PLOT SYNCHRONIZED RESULTS
+
+result.deltas = zeros(1,length(TOSSIT_id_list));
+for t = 1:length(TOSSIT_id_list)
+    [sig,I] = spectrogramCorr(result.source, result.("TOSSIT" + TOSSIT_id_list(t)), Nw, noverlap, nfft, result.fs);
+    result.("TOSSIT" + TOSSIT_id_list(t) + "_synced") = sig;
+    result.deltas(t) = I;
+end
+
+% plot spectrograms of results
+Nw = 45;
+noverlap = Nw-8;
+nfft = 1012;
+
+figure;
+[stft,f,t] = spectrogram(result.source,Nw,noverlap,nfft,result.fs);
+subplot(5,1,1)
+imagesc(t,f,10*log10(abs(stft).^2))
+colormap('turbo')
+axis xy
+xlabel("Time [s]")
+ylabel("Frequency [Hz]")
+title("TOSSIT " + TOSSIT_id + " (source)")
+
+for c = 1:length(TOSSIT_id_list)
+    subplot(5,1,c+1)
+    [stft,f,t] = spectrogram(result.("TOSSIT" + TOSSIT_id_list(c) + "_synced"),Nw,noverlap,nfft,result.fs);
+    imagesc(t,f,10*log10(abs(stft).^2))
+    colormap('turbo')
+    axis xy
+    xlabel("Time [s]")
+    ylabel("Frequency [Hz]")
+    title("TOSSIT " + TOSSIT_id_list(c))
+end
+sgt = sgtitle("Fine Synchronize");
+sgt.FontSize = 30;
 
 %% FUNCTIONS
 
@@ -137,4 +182,40 @@ function [xml_file, closest_start_time] = getClosestStartTimeFile(xmls_path, sta
     % assign return variables
     closest_start_time = start_times(ind_closest);
     xml_file = xmls(ind_closest);
+end
+
+function [sig_shifted, I] = spectrogramCorr(x, y, Nw, noverlap, nfft, fs)
+    
+    % calculate spectrograms
+    [stftx,~,~] = spectrogram(x,Nw,noverlap,nfft,fs);
+    [stfty,~,~] = spectrogram(y,Nw,noverlap,nfft,fs);
+    
+    % put on log scale
+    stftx = 10*log10(abs(stftx).^2);
+    stfty = 10*log10(abs(stfty).^2);
+    
+    % calculate channel-wise xcorrs
+    y_dim_res = 2*max(size(stftx,2),size(stfty,2)) - 1;
+    x_dim_res = size(stftx,1);
+    cc = zeros(x_dim_res, y_dim_res);
+    for i=1:x_dim_res
+        [c, lags] = xcorr(stftx(i,:) - mean(stftx(i,:)), stfty(i,:) - mean(stfty(i,:)), 'coeff');
+        cc(i,:) = c;
+    end
+    
+    % sum each channel and get max xcorr
+    cc = sum(cc,1);
+    [~,I] = max(cc);
+    
+    % convert shift to signal samples rather than spectrogram samples
+    sig_spect_sample_ratio = round(length(x) / size(stftx,2));
+    I = sig_spect_sample_ratio*lags(I);
+    
+    % rotate signal
+    sig_shifted = circshift(y, I);
+    if I > 0
+        sig_shifted(1:I) = 0;
+    else
+        sig_shifted(I:end) = 0;
+    end
 end
