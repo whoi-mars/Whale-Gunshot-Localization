@@ -40,6 +40,7 @@ source_file_num = split_path(end-1);
 % assert sampling frequency is what we expect and save result
 assert(fs == fs_file, "sampling frequency from file does not match expected");
 result.source = resample(y, fs_desired, fs);
+result.source = result.source - mean(result.source);
 result.fs = fs_desired;
 clear y fs_file
 
@@ -96,6 +97,7 @@ for j = 1:length(closest_xml_list)
     % assert sampling frequency is what we expect and save result
     assert(fs == fs_file, "sampling frequency from file does not match expected");
     result.("TOSSIT" + split_xml(1)) = resample(y, fs_desired, fs);
+    result.("TOSSIT" + split_xml(1)) = result.("TOSSIT" + split_xml(1)) - mean(result.("TOSSIT" + split_xml(1)));
     clear y fs_file
 end
 
