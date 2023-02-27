@@ -1,3 +1,11 @@
 dataset:
   data_directory: "/workspace/data/TOSSIT_sims"
   entry_keys: [T, data, fs, labels, t_dec_max, t_dec_min]
+signal:
+  fs: 600 # [Hz]
+  T: 10 # [s]
+stft:
+  window: "hann"
+  nperseg: 62
+  noverlap: 56
+  nfft: 463
