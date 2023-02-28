@@ -12,7 +12,7 @@ with open("config.yaml", 'r') as yaml_file:
     config = yaml.load(yaml_file, Loader=yaml.Loader)
 
 class TestH5BatchSampler(unittest.TestCase):
-    
+
     def test_train_indices(self):
         if os.path.isfile(config['dataset']['data_directory'] + '/train_indices.npy'):
             h5bs = H5BatchSampler(split='train', batch_size=1)
@@ -46,21 +46,23 @@ class TestH5BatchSampler(unittest.TestCase):
     def test_batch_size(self):
         batch_sizes = [1, 10, 13, 16, 500]
         for bs in batch_sizes:
-            h5bs_list = list(H5BatchSampler(split='train', batch_size=bs))
-            if len(h5bs_list[-1]) < bs:
-                h5bs_list = h5bs_list[:-1]
-            assert(all(len(batch) == bs for batch in h5bs_list))
+            with self.subTest(i=bs):
+                h5bs_list = list(H5BatchSampler(split='train', batch_size=bs))
+                if len(h5bs_list[-1]) < bs:
+                    h5bs_list = h5bs_list[:-1]
+                assert(all(len(batch) == bs for batch in h5bs_list))
 
     def test_drop_last(self):
         batch_sizes = [1, 10, 13, 16, 500]
         for bs in batch_sizes:
-            h5bs = H5BatchSampler(split='train', batch_size=bs, drop_last=True)
-            idx = h5bs.idx
-            h5bs_list = list(h5bs)
-            if bs > len(idx):
-                assert(len(h5bs_list) == 0)
-            else:
-                assert(len(h5bs_list[-1]) == bs)
+            with self.subTest(i=bs):
+                h5bs = H5BatchSampler(split='train', batch_size=bs, drop_last=True)
+                idx = h5bs.idx
+                h5bs_list = list(h5bs)
+                if bs > len(idx):
+                    assert(len(h5bs_list) == 0)
+                else:
+                    assert(len(h5bs_list[-1]) == bs)
 
     def test_shuffle(self):
         train_indices = list(np.load(config['dataset']['data_directory'] + '/train_indices.npy', allow_pickle=True))
