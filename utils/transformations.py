@@ -19,7 +19,7 @@ def to_spect(x):
     Returns
     -------
     array-like
-        Spectrograms of input timeseries'. The shape is (# signal sets, ..., 1, frequency, time)
+        Spectrograms of input timeseries'. The shape is (# signal sets OR 0, ..., 1, frequency, time)
     """
 
     # calculate STFTs
