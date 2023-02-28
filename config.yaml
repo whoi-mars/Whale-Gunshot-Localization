@@ -1,6 +1,6 @@
 dataset:
   data_directory: "/workspace/data/TOSSIT_sims"
-  entry_keys: [T, data, fs, labels, t_dec_max, t_dec_min]
+  entry_keys: [T, data, fs, labels, t_dec_max, t_dec_min, class_labels]
 signal:
   fs: 600 # [Hz]
   T: 10 # [s]
@@ -9,3 +9,6 @@ stft:
   nperseg: 62
   noverlap: 56
   nfft: 463
+scaling:
+  max_x: 22.7327
+  max_y: 24.5555
