@@ -32,9 +32,10 @@ class SimData(data.Dataset):
     squeeze : bool
         whether or not to eliminate the singleton channel dimension 
     """
+
     def __init__(self, transform=None, squeeze=False):
         """
-        Construct attributes and grad reference to data file
+        Construct attributes and grab reference to data file
 
         Parameters
         ----------
@@ -50,7 +51,8 @@ class SimData(data.Dataset):
         self.inputs = self._load_h5()
 
         # get imsize
-        self.size = to_spect(self.inputs['data'][[0]]).shape[2:]
+        self.num_TOSSITs = self.inputs['data'].shape[1]
+        self.size = to_spect(self.inputs['data'][0]).shape[2:]
 
         # for scaling location labels
         self.max_x = config['scaling']['max_x']
@@ -92,13 +94,14 @@ class SimData(data.Dataset):
         return dict(data=file['data'], labels=file['labels'])
 
 
-def get_dataloaders(splits, batch_size, shuffle=True, transform=None, squeeze=False):
+def get_dataloaders(splits, batch_size, shuffle=True, transform=None, squeeze=False, num_workers=10):
     """
-    Construct dictionary of dataloaders for every split.
+    Construct dictionary of dataloaders for splits ('train', 'val', 'test').
 
     Parameters
     ----------
-
+    splits : list[str]
+        list of desires splits to include in dataloaders dict
     batch_size : int
         number of elements per batch
     shuffle : bool
@@ -117,12 +120,17 @@ def get_dataloaders(splits, batch_size, shuffle=True, transform=None, squeeze=Fa
     assert all(x in ['train', 'val', 'test'] for x in splits), "Valid splits are 'train', 'val', and 'test'"
 
     # prepare transforms
-    data_transform = {x : transform[x] if transform is not None else transform for x in splits}
-    
+    data_transform = dict()
+    for split in splits:
+        if split == 'train':
+            data_transform[split] = transform['train'] if transform is not None else transform
+        else:
+            data_transform[split] = transform['eval'] if transform is not None else transform
+
     # prepare datasets
     datasets = {x : SimData(transform=data_transform[x], squeeze=squeeze) for x in data_transform.keys()}
 
     # prepare dataloaders
-    dataloaders = {x : data.DataLoader(datasets[x], num_workers=1, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, shuffle=False if x != 'train' else shuffle)) for x in data_transform.keys()}
+    dataloaders = {x : data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, shuffle=False if x != 'train' else shuffle)) for x in data_transform.keys()}
 
     return dataloaders
