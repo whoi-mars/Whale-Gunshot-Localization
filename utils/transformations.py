@@ -76,7 +76,10 @@ class Normalize1DChannel:
         self.num_signals = mu_list.shape[0]
 
     def norm(self, x):
-        """divide input spectrogram rows by provided mean and divide by provided std"""
+        """
+        Divide input spectrogram rows by provided mean and divide by provided std.
+        This assumes the input is of shape (# spectrograms, 1, # frequency bins, # time bins).
+        """
 
         return (x - self.mu_list.view(self.num_signals, 1, -1, 1)) / (self.std_list.view(self.num_signals, 1, -1, 1))
 
