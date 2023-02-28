@@ -84,15 +84,25 @@ class Normalize1DChannel:
         return self.norm(tensor)
 
 def get_image_transform():
+    """
+    Gets dictionary of spectrogram preprocessing transforms for training and evaluation.
+
+    Returns
+    -------
+    dict
+        dictionary with training and evaluation preprocessing transforms
+    """
 
     # load mean and std
     mu_list = np.load(config['dataset']['data_directory'] + '/mean.npy', allow_pickle=True)
     std_list = np.load(config['dataset']['data_directory'] + '/std.npy', allow_pickle=True)
     
+    # evaluation transforms
     transform_eval = transforms.Compose([
         Normalize1DChannel(mu_list, std_list)
     ])
 
+    # training transforms
     transform_train = transforms.Compose([
         Normalize1DChannel(mu_list, std_list)
     ])
