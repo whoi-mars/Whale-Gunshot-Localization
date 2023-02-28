@@ -24,6 +24,10 @@ class H5BatchSampler(data.Sampler):
         samples per batch
     shuffle : bool
         whether or not to shuffle split index list
+    drop_last : bool
+        whether or not to drop remainder after last batch is taken
+    num_sampes : int
+        number of samples in split
     """
 
     def __init__(self, split, batch_size, drop_last=False, shuffle=False):
@@ -45,6 +49,7 @@ class H5BatchSampler(data.Sampler):
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.drop_last = drop_last
+        self.num_samples = len(self.idx)
         self.__batch_length = len(self.idx) // self.batch_size if self.drop_last else math.ceil(len(self.idx) / self.batch_size)
 
     def _chunk(self, indices, size):
