@@ -1,0 +1,254 @@
+import argparse
+import copy
+import time
+import math
+import os
+
+from tqdm import tqdm
+import yaml
+import wandb
+import torch
+import torch.nn.functional as F
+
+from datasets.dataloaders import get_dataloaders
+from utils.transformations import get_image_transform
+from models.lenet import LeNet5
+from losses.loc_mse_loss import LocMSELoss
+
+# load config file
+with open("config.yaml", 'r') as yaml_file:
+    config = yaml.load(yaml_file, Loader=yaml.Loader)
+
+# training arguments
+parser = argparse.ArgumentParser(description="Training on simulated data from adiabatic modes simulator")
+parser.add_argument('--batch_size', type=int, default=128,
+                    help='batch size (default: 128)')
+parser.add_argument('--start_epoch', type=int, default=1,
+                    help='epoch number to start at, inclusive (default: 1)')
+parser.add_argument('--end_epoch', type=int, default=10,
+                    help='epoch number to end at, inclusive (default: 10)')
+parser.add_argument('--lr', type=float, default=1e-3,
+                    help='initial learning rate (default: 1e-3)')
+parser.add_argument('--seed', type=int, default=1111,
+                    help='random seed (default: 1111)')
+parser.add_argument('--save_all_epochs', action='store_true',
+                    help='store weights for all epochs during training (default: False)')
+parser.add_argument('--checkpoint_dir', type=str, default='model',
+                    help='directory where model weight checkpoints will be saved (default: model)')
+parser.add_argument('--verbose', action='store_true',
+                    help='display progress while training (default: False)')
+parser.add_argument('--wb_id', type=str, nargs=None,
+                    help='id of weights and biases run to continue (default: None)')
+parser.add_argument('--no_wb', action='store_true',
+                    help='disable weights and biases logging (default: False)')
+
+# parse training arguments
+args = parser.parse_args()
+
+# setup weights and biases
+if not args.no_wb:
+    # login
+    wandb.login()
+
+    # get epochs currently trained for if resuming
+    if args.wb_id is not None:
+        api = wandb.Api()
+        run = api.run("markg98/gunshot-localization/" + args.wb_id)
+        epoch_offset = run.config['epochs']
+    else:
+        epoch_offset = 0
+    
+    # intialize
+    wandb.init(
+        project="gunshot-localization",
+        config={
+            "epochs" : args.end_epoch - args.start_epoch + 1 + epoch_offset,
+            "batch_size" : args.batch_size,
+            "lr" : args.lr,
+            "window" : config['stft']['window'],
+            "nperseg" : config['stft']['nperseg'],
+            "noverlap" : config['stft']['noverlap'],
+            "nfft" : config['stft']['nfft'],
+            "max_x" : config['scaling']['max_x'],
+            "max_y" : config['scaling']['max_y'],
+            "checkpoint_directory" : args.checkpoint_dir
+        },
+        id=args.wb_id,
+        resume= True if args.wb_id is not None else False
+    )
+
+# set PyTorch seed
+torch.manual_seed(args.seed)
+
+# get devices
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+if torch.cuda.is_available():
+    print("\nUsing the GPU!")
+else:
+    print("WARNING: Could not find GPU. Using CPU only.")
+
+# get dataloaders
+dl = get_dataloaders(splits=['train', 'val'],
+                    batch_size=args.batch_size,
+                    shuffle=True,
+                    transform=get_image_transform(),
+                    squeeze=True)
+n_steps_per_epoch = len(dl['train'])
+
+# get label scaling constants for error calculations
+max_x = dl['train'].dataset.max_x
+max_y = dl['train'].dataset.max_y
+
+# print size of input
+print(f"spectrogram size: {dl['train'].dataset.size}\n")
+
+# setup model checkpoint directory
+save_dir = os.path.join(config['models']['checkpoints_directories'], args.checkpoint_dir)
+os.makedirs(save_dir, exist_ok=True)
+
+# TODO: initialize model
+model = LeNet5(2).to(device)
+# initialize optimizer
+optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+# TODO: set loss
+criterion = LocMSELoss()
+
+# load model/optimizer checkpoint or start from scratch
+if args.start_epoch > 1:
+    # try to load previous epoch save
+    try:
+        checkpoint = torch.load(os.path.join(save_dir, f'weights_{args.start_epoch - 1}.pt'))
+    except:
+        raise ValueError("Desired start epoch does not have a corresponding set of saved model weights.")
+    # load states if possible
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, save_dir=save_dir, save_all_epochs=args.save_all_epochs, start_epoch=args.start_epoch, verbose=args.verbose):
+    
+    # time training
+    since = time.time()
+
+    # history vectors
+    val_x_mse_history = []
+    val_y_mse_history = []
+    train_x_mse_history = []
+    train_y_mse_history = []
+
+    # initialize best model
+    best_model_wts = copy.deepcopy(model.state_dict())
+    best_opt_state = copy.deepcopy(optimizer.state_dict())
+    best_mse = float('inf')
+
+    # train/val loops
+    for epoch in range(start_epoch, end_epoch+1):
+        print(f"Epoch {epoch}/{end_epoch}")
+        print('-'*10)
+
+        for phase in ['train', 'val']:
+            if phase == 'train':
+                model.train()
+            else:
+                model.eval()
+
+            # keep track of loss, and error
+            running_loss = 0.0
+            running_x_sq_error = 0.0
+            running_y_sq_error = 0.0
+
+            # process batches
+            for step, (inputs, x_targets, y_targets) in enumerate(tqdm(dataloaders[phase], disable=not verbose)):
+                
+                # put data/labels on device
+                inputs = inputs.to(device)
+                x_targets = x_targets.to(device)
+                y_targets = y_targets.to(device)
+
+                # zero out gradient for new batch
+                optimizer.zero_grad()
+
+                with torch.set_grad_enabled(phase == 'train'):
+                    # get model outputs and loss
+                    outputs = model(inputs)
+                    loss = criterion(outputs, x_targets, y_targets)
+
+                    # backpropogate
+                    if phase == 'train':
+                        loss.backward()
+                        optimizer.step()
+
+                    running_loss += loss.item()*inputs.size(0)
+                    running_x_sq_error += F.mse_loss(outputs[:,0] * max_x / 1000, x_targets * max_x / 1000)
+                    running_y_sq_error += F.mse_loss(outputs[:,1] * max_y / 1000, y_targets * max_y / 1000)
+                
+                    if not args.no_wb:
+                        if phase == 'train':
+                            step_metrics = {"train/train_loss" : loss,
+                                            "train/epoch" : (step + 1 + (n_steps_per_epoch * epoch)) / n_steps_per_epoch}
+                            if step + 1 < n_steps_per_epoch:
+                                wandb.log(step_metrics)
+
+            # calculate epoch statistics
+            epoch_loss = running_loss / dataloaders[phase].batch_sampler.num_samples
+            epoch_x_mse = running_x_sq_error / dataloaders[phase].batch_sampler.num_samples
+            epoch_y_mse = running_y_sq_error / dataloaders[phase].batch_sampler.num_samples
+
+            # end of epoch wandb logging
+            if not args.no_wb:
+                if phase == 'train':
+                    train_metrics = {"train/train_avg_loss" : epoch_loss,
+                                    "train/train_x_rmse" : torch.sqrt(epoch_x_mse),
+                                    "train/train_y_rmse" : torch.sqrt(epoch_y_mse)}
+                    wandb.log({**step_metrics, **train_metrics})
+                else:
+                    val_metrics = {"val/val_avg_loss" : epoch_loss,
+                                "val/val_x_rmse" : torch.sqrt(epoch_x_mse),
+                                "val/val_y_rmse" : torch.sqrt(epoch_y_mse)}
+                    wandb.log(val_metrics)
+
+            # print epoch information
+            print("{} Loss: {:.4f} -- X_RMSE: {:.4f} km -- Y_RMSE: {:.4f} km".format(phase, epoch_loss, torch.sqrt(epoch_x_mse), torch.sqrt(epoch_y_mse)))
+
+            # check if we update best model
+            if phase == 'val' and ((epoch_x_mse + epoch_y_mse) / 2) < best_mse:
+                best_mse = ((epoch_x_mse + epoch_y_mse) / 2)
+                best_model_wts = copy.deepcopy(model.state_dict())
+                best_opt_state = copy.deepcopy(optimizer.state_dict())
+            
+            # append to histories and save model weights if saving all epochs
+            if phase == 'train':
+                train_x_mse_history.append(epoch_x_mse)
+                train_y_mse_history.append(epoch_y_mse)
+                if save_all_epochs:
+                    torch.save({"model_state_dict" : model.state_dict(),
+                                "optimizer_state_dict" : optimizer.state_dict()},
+                                os.path.join(save_dir, f'weights_{epoch}.pt'))
+            else:
+                val_x_mse_history.append(epoch_x_mse)
+                val_y_mse_history.append(epoch_y_mse)
+
+        # new line after train/val cycle
+        print()
+
+    # training done!
+    time_elapsed = time.time() - since
+    print("Training completed in {:.0f}h {:.0f}m {:.0f}s".format(time_elapsed // 3600, (time_elapsed // 60) % 60, time_elapsed % 60))
+    print("Best avg MSE: {:.4f} km^2".format(best_mse))
+    print("Best avg RMSE: {:.4f} km".format(torch.sqrt(best_mse)))
+
+    # save best model weights
+    torch.save({"model_state_dict" : best_model_wts,
+                "optimizer_state_dict" : best_opt_state},
+                os.path.join(save_dir, f'weights_best.pt'))
+
+    # if we're not saving every epoch, save the last one
+    if not save_all_epochs:
+        torch.save({"model_state_dict" : model.state_dict(),
+                    "optimizer_state_dict" : optimizer.state_dict()},
+                    os.path.join(save_dir, f'weights_{epoch}.pt'))
+
+if __name__ == "__main__":
+    train(model=model,
+        dataloaders=dl,
+        criterion=criterion,
+        optimizer=optimizer)
