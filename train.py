@@ -125,7 +125,30 @@ if args.start_epoch > 1:
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
 def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, save_dir=save_dir, save_all_epochs=args.save_all_epochs, start_epoch=args.start_epoch, verbose=args.verbose):
-    
+    """
+    Training function.
+
+    Parameters
+    ----------
+    model : nn.Module
+        model to be trained
+    dataloaders : dict
+        dictionary of dataloaders for each split
+    criterion : nn.Module
+        loss function
+    optimizer : optimizer from torch.optim
+        chosen optimizer
+    end_epoch : int
+        epoch to end training on, inclusive
+    save_dir : str
+        path to directories where all model checkpoints are stored
+    save_all_epochs : bool
+        save model weights after each epoch
+    start_epoch : int
+        epoch to start training on, inclusive
+    verbose : bool
+        display progress while training
+    """
     # time training
     since = time.time()
 
