@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 class LocMSELoss(nn.Module):
@@ -12,13 +13,13 @@ class LocMSELoss(nn.Module):
         pytorch MSE loss functio module
     """
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         """
         Construct MSE module
         """
 
         super(LocMSELoss, self).__init__()
-        self.MSE = nn.MSELoss()
+        self.MSE = nn.MSELoss(**kwargs)
 
     def forward(self, outputs, x_targets, y_targets):
         """
@@ -27,19 +28,16 @@ class LocMSELoss(nn.Module):
         Parameters
         ----------
         outputs : array-like
-            predicted X and Y location for a batch of inputs
+            predicted X and Y location for a batch of inputs (shape: N X 2)
         x_targets : array-like
-            true X locations for a batch of data
+            true X locations for a batch of data (shape: N X 1)
         y_targets : array-like
-            true Y locations for a batch of data
+            true Y locations for a batch of data (shape: N X 1)
 
         Returns
         -------
         float
             calculated loss
         """
-
-        # TODO: combine both targets into a single MSE vector?
-        x_loss = self.MSE(outputs[:,0], x_targets)
-        y_loss = self.MSE(outputs[:,1], y_targets)
-        return x_loss + y_loss
+        
+        return self.MSE(outputs, torch.cat((x_targets, y_targets), dim=1))
