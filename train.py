@@ -5,6 +5,7 @@ import math
 import os
 
 from tqdm import tqdm
+import numpy as np
 import yaml
 import wandb
 import torch
@@ -77,15 +78,19 @@ if not args.no_wb:
         resume= True if args.wb_id is not None else False
     )
 
-# set PyTorch seed
-torch.manual_seed(args.seed)
-
 # get devices
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 if torch.cuda.is_available():
     print("\nUsing the GPU!")
+    # set GPU-related seeds
+    torch.cuda.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = True
 else:
     print("WARNING: Could not find GPU. Using CPU only.")
+
+# set PyTorch/numpy seeds
+torch.manual_seed(args.seed)
+np.random.seed(args.seed)
 
 # get dataloaders
 dl = get_dataloaders(splits=['train', 'val'],
@@ -200,9 +205,10 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                         loss.backward()
                         optimizer.step()
 
-                    running_loss += loss.item()*inputs.size(0)
-                    running_x_sq_error += F.mse_loss(outputs[:,0] * max_x / 1000, x_targets * max_x / 1000)
-                    running_y_sq_error += F.mse_loss(outputs[:,1] * max_y / 1000, y_targets * max_y / 1000)
+                    # get running loss sum and running sqared error sum (in km) for the X and Y components of location
+                    running_loss += loss.item()*inputs.size(0)*outputs.size(1)
+                    running_x_sq_error += F.mse_loss(outputs[:,[0]] * max_x / 1000, x_targets * max_x / 1000, reduction='sum')
+                    running_y_sq_error += F.mse_loss(outputs[:,[1]] * max_y / 1000, y_targets * max_y / 1000, reduction='sum')
                 
                     if not args.no_wb:
                         if phase == 'train':
