@@ -13,7 +13,7 @@ import torch.nn.functional as F
 
 from datasets.dataloaders import get_dataloaders
 from utils.transformations import get_image_transform
-from models.lenet import LeNet5
+from models.tcn import FusionTCN
 from losses.loc_mse_loss import LocMSELoss
 
 # load config file
@@ -28,10 +28,16 @@ parser.add_argument('--start_epoch', type=int, default=1,
                     help='epoch number to start at, inclusive (default: 1)')
 parser.add_argument('--end_epoch', type=int, default=10,
                     help='epoch number to end at, inclusive (default: 10)')
-parser.add_argument('--lr', type=float, default=1e-3,
+parser.add_argument('--lr', type=float, default=1e-4,
                     help='initial learning rate (default: 1e-3)')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed (default: 1111)')
+parser.add_argument('--levels', type=int, default=8,
+                    help='number of TCN blocks including (fusion default: 8)')
+parser.add_argument('--kernel_size', type=int, default=6,
+                    help='size of 1D kernel (default: 6)')
+parser.add_argument('--dropout', type=float, default=0.2,
+                    help='spatial dropout parameter (default: 0.2)')
 parser.add_argument('--save_all_epochs', action='store_true',
                     help='store weights for all epochs during training (default: False)')
 parser.add_argument('--checkpoint_dir', type=str, default='model',
@@ -97,7 +103,8 @@ dl = get_dataloaders(splits=['train', 'val'],
                     batch_size=args.batch_size,
                     shuffle=True,
                     transform=get_image_transform(),
-                    squeeze=True)
+                    squeeze=True,
+                    num_workers=20)
 n_steps_per_epoch = len(dl['train'])
 
 # get label scaling constants for error calculations
@@ -111,11 +118,16 @@ print(f"spectrogram size: {dl['train'].dataset.size}\n")
 save_dir = os.path.join(config['models']['checkpoints_directories'], args.checkpoint_dir)
 os.makedirs(save_dir, exist_ok=True)
 
-# TODO: initialize model
-model = LeNet5(2).to(device)
+# initialize TCN model
+model = FusionTCN(num_inputs=dl['train'].dataset.num_TOSSITs, 
+                input_size=dl['train'].dataset.size[0], 
+                output_size=2,
+                num_channels=[250] + [368]*(args.levels-1),
+                kernel_size=args.kernel_size,
+                dropout=args.dropout).to(device)
 # initialize optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-# TODO: set loss
+# set loss
 criterion = LocMSELoss()
 
 # load model/optimizer checkpoint or start from scratch
