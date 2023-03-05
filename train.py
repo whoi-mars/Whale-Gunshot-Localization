@@ -40,6 +40,8 @@ parser.add_argument('--dropout', type=float, default=0.2,
                     help='spatial dropout parameter (default: 0.2)')
 parser.add_argument('--save_all_epochs', action='store_true',
                     help='store weights for all epochs during training (default: False)')
+parser.add_argument('--DP', action='store_true',
+                    help='use PyTorch nn.DataParallel')
 parser.add_argument('--checkpoint_dir', type=str, default='model',
                     help='directory where model weight checkpoints will be saved (default: model)')
 parser.add_argument('--verbose', action='store_true',
@@ -125,6 +127,11 @@ model = FusionTCN(num_inputs=dl['train'].dataset.num_TOSSITs,
                 num_channels=[250] + [368]*(args.levels-1),
                 kernel_size=args.kernel_size,
                 dropout=args.dropout).to(device)
+
+# data parallel
+if args.DP:
+    model = torch.nn.DataParallel(model)
+
 # initialize optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 # set loss
@@ -140,6 +147,24 @@ if args.start_epoch > 1:
     # load states if possible
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+def get_model_state_dict(model):
+
+    """
+    Save the model state dictionary, taking into account whether
+    or not the model is wrapped in a torch.nn.DataParallel object.
+    Parameters
+    ----------
+    model: torch.nn.Module, model to save state dict for.
+    Returns
+    -------
+    state_dict, state dictionary for model.
+    """
+
+    if isinstance(model, torch.nn.DataParallel):
+        return model.module.state_dict()
+    else:
+        return model.state_dict()
 
 def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, save_dir=save_dir, save_all_epochs=args.save_all_epochs, start_epoch=args.start_epoch, verbose=args.verbose):
     """
@@ -169,14 +194,8 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
     # time training
     since = time.time()
 
-    # history vectors
-    val_x_mse_history = []
-    val_y_mse_history = []
-    train_x_mse_history = []
-    train_y_mse_history = []
-
     # initialize best model
-    best_model_wts = copy.deepcopy(model.state_dict())
+    best_model_wts = copy.deepcopy(get_model_state_dict(model))
     best_opt_state = copy.deepcopy(optimizer.state_dict())
     best_mse = float('inf')
 
@@ -252,20 +271,14 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
             # check if we update best model
             if phase == 'val' and ((epoch_x_mse + epoch_y_mse) / 2) < best_mse:
                 best_mse = ((epoch_x_mse + epoch_y_mse) / 2)
-                best_model_wts = copy.deepcopy(model.state_dict())
+                best_model_wts = copy.deepcopy(get_model_state_dict(model))
                 best_opt_state = copy.deepcopy(optimizer.state_dict())
             
             # append to histories and save model weights if saving all epochs
-            if phase == 'train':
-                train_x_mse_history.append(epoch_x_mse)
-                train_y_mse_history.append(epoch_y_mse)
-                if save_all_epochs:
-                    torch.save({"model_state_dict" : model.state_dict(),
-                                "optimizer_state_dict" : optimizer.state_dict()},
-                                os.path.join(save_dir, f'weights_{epoch}.pt'))
-            else:
-                val_x_mse_history.append(epoch_x_mse)
-                val_y_mse_history.append(epoch_y_mse)
+            if phase == 'train' and save_all_epochs:
+                torch.save({"model_state_dict" : get_model_state_dict(model),
+                            "optimizer_state_dict" : optimizer.state_dict()},
+                            os.path.join(save_dir, f'weights_{epoch}.pt'))
 
         # new line after train/val cycle
         print()
@@ -283,7 +296,7 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
 
     # if we're not saving every epoch, save the last one
     if not save_all_epochs:
-        torch.save({"model_state_dict" : model.state_dict(),
+        torch.save({"model_state_dict" : get_model_state_dict(model),
                     "optimizer_state_dict" : optimizer.state_dict()},
                     os.path.join(save_dir, f'weights_{epoch}.pt'))
 
