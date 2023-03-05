@@ -10,7 +10,7 @@ class LocMSELoss(nn.Module):
     Attributes
     ----------
     MSE : nn.Module
-        pytorch MSE loss functio module
+        pytorch MSE loss function module
     """
 
     def __init__(self, **kwargs):
