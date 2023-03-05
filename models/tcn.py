@@ -9,6 +9,10 @@ from torch.nn.utils import weight_norm
 ##################################################################
 
 class Chomp1d(nn.Module):
+    """
+    Chop a portion of the last channel of the tensor.
+    """
+
     def __init__(self, chomp_size):
         super(Chomp1d, self).__init__()
         self.chomp_size = chomp_size
@@ -18,6 +22,10 @@ class Chomp1d(nn.Module):
 
 
 class TemporalBlock(nn.Module):
+    """
+    TCN residual block.
+    """
+
     def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2):
         super(TemporalBlock, self).__init__()
         self.conv1 = weight_norm(nn.Conv1d(n_inputs, n_outputs, kernel_size,
@@ -50,6 +58,10 @@ class TemporalBlock(nn.Module):
         return self.relu(out + res)
 
 class TemporalConvNet(nn.Module):
+    """
+    Standard TCN.
+    """
+
     def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.2):
         super(TemporalConvNet, self).__init__()
         layers = []
@@ -67,6 +79,10 @@ class TemporalConvNet(nn.Module):
         return self.network(x)
 
 class FusionTemporalConvNet(nn.Module):
+    """
+    TCN with multi-input fusion.
+    """
+
     def __init__(self, num_inputs, input_channels, num_channels, kernel_size=2, dropout=0.2):
         super(FusionTemporalConvNet, self).__init__()
         # layers to fuse inputs
@@ -104,6 +120,10 @@ class FusionTemporalConvNet(nn.Module):
 ##################################################################
 
 class FusionTCN(nn.Module):
+    """
+    TCN with multi-input fusion and a linear output layer.
+    """
+
     def __init__(self, num_inputs, input_size, output_size, num_channels, kernel_size, dropout):
         super(FusionTCN, self).__init__()
         self.tcn = FusionTemporalConvNet(num_inputs, input_size, num_channels, kernel_size=kernel_size, dropout=dropout)
