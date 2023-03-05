@@ -222,12 +222,11 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                     running_x_sq_error += F.mse_loss(outputs[:,[0]] * max_x / 1000, x_targets * max_x / 1000, reduction='sum')
                     running_y_sq_error += F.mse_loss(outputs[:,[1]] * max_y / 1000, y_targets * max_y / 1000, reduction='sum')
                 
-                    if not args.no_wb:
-                        if phase == 'train':
-                            step_metrics = {"train/train_loss" : loss,
-                                            "train/epoch" : (step + 1 + (n_steps_per_epoch * epoch)) / n_steps_per_epoch}
-                            if step + 1 < n_steps_per_epoch:
-                                wandb.log(step_metrics)
+                    if (not args.no_wb) and phase == 'train':
+                        step_metrics = {"train/train_loss" : loss,
+                                        "train/epoch" : (step + 1 + (n_steps_per_epoch * epoch)) / n_steps_per_epoch}
+                        if step + 1 < n_steps_per_epoch:
+                            wandb.log(step_metrics)
 
             # calculate epoch statistics
             epoch_loss = running_loss / dataloaders[phase].batch_sampler.num_samples
