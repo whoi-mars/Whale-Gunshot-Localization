@@ -1,9 +1,10 @@
 dataset:
   data_directory: "/workspace/data/TOSSIT_sims"
+  exp_data_directory: "/workspace/data/cape_cod_bay/acoustics"
   entry_keys: [T, data, fs, labels, t_dec_max, t_dec_min, class_labels]
 signal:
   fs: 600 # [Hz]
-  T: 10 # [s]
+  T: 6 # [s]
 stft:
   window: "hann"
   nperseg: 62
@@ -11,6 +12,8 @@ stft:
   nfft: 463
 scaling:
   max_x: 22732.7 # [m]
+  min_x: -12230.0 # [m]
   max_y: 24555.5 # [m]
+  min_y: -3984.5 # [m]
 models:
   checkpoints_directories: "/workspace/data/models"
