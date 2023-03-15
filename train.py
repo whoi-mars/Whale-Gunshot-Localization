@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from datasets.dataloaders import get_dataloaders
 from utils.transformations import get_image_transform
 from models.tcn import FusionTCN
-from losses.loc_mse_loss import LocMSELoss
+from losses.uncertainty_losses import UncertainLocLoss
 
 # load config file
 with open("config.yaml", 'r') as yaml_file:
@@ -29,7 +29,7 @@ parser.add_argument('--start_epoch', type=int, default=1,
 parser.add_argument('--end_epoch', type=int, default=10,
                     help='epoch number to end at, inclusive (default: 10)')
 parser.add_argument('--lr', type=float, default=1e-4,
-                    help='initial learning rate (default: 1e-3)')
+                    help='initial learning rate (default: 1e-4)')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed (default: 1111)')
 parser.add_argument('--levels', type=int, default=8,
@@ -38,6 +38,10 @@ parser.add_argument('--kernel_size', type=int, default=6,
                     help='size of 1D kernel (default: 6)')
 parser.add_argument('--dropout', type=float, default=0.2,
                     help='spatial dropout parameter (default: 0.2)')
+parser.add_argument('--clip', type=float, default=-1,
+                    help='gradient clip, -1 means no clip (default: -1)')
+parser.add_argument('--weight_decay', type=float, default=0.0,
+                    help='weight decay (default: 0.0)')
 parser.add_argument('--save_all_epochs', action='store_true',
                     help='store weights for all epochs during training (default: False)')
 parser.add_argument('--DP', action='store_true',
@@ -92,7 +96,6 @@ if torch.cuda.is_available():
     print("\nUsing the GPU!")
     # set GPU-related seeds
     torch.cuda.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = True
 else:
     print("WARNING: Could not find GPU. Using CPU only.")
 
@@ -122,20 +125,12 @@ os.makedirs(save_dir, exist_ok=True)
 
 # initialize TCN model
 model = FusionTCN(num_inputs=dl['train'].dataset.num_TOSSITs, 
+                num_outputs=2,
                 input_size=dl['train'].dataset.size[0], 
                 output_size=2,
-                num_channels=[250] + [368]*(args.levels-1),
+                num_channels=[250] + [500] + [368]*(args.levels-2),
                 kernel_size=args.kernel_size,
                 dropout=args.dropout).to(device)
-
-# data parallel
-if args.DP:
-    model = torch.nn.DataParallel(model)
-
-# initialize optimizer
-optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-# set loss
-criterion = LocMSELoss()
 
 # load model/optimizer checkpoint or start from scratch
 if args.start_epoch > 1:
@@ -147,18 +142,34 @@ if args.start_epoch > 1:
     # load states if possible
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    log_var_list = checkpoint['log_vars']
+else:
+    log_var_list = None
+
+# set loss
+criterion = UncertainLocLoss(log_var_list=log_var_list).to(device)
+# initialize optimizer
+optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr, weight_decay=args.weight_decay)
+
+# data parallel
+if args.DP:
+    model = torch.nn.DataParallel(model)
 
 def get_model_state_dict(model):
 
     """
     Save the model state dictionary, taking into account whether
     or not the model is wrapped in a torch.nn.DataParallel object.
+    
     Parameters
     ----------
-    model: torch.nn.Module, model to save state dict for.
+    model: torch.nn.Module
+        model to save state dict for.
+    
     Returns
     -------
-    state_dict, state dictionary for model.
+    state_dict 
+        state dictionary for model.
     """
 
     if isinstance(model, torch.nn.DataParallel):
@@ -197,6 +208,7 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
     # initialize best model
     best_model_wts = copy.deepcopy(get_model_state_dict(model))
     best_opt_state = copy.deepcopy(optimizer.state_dict())
+    best_log_vars = copy.deepcopy(criterion.log_vars)
     best_mse = float('inf')
 
     # train/val loops
@@ -217,7 +229,7 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
 
             # process batches
             for step, (inputs, x_targets, y_targets) in enumerate(tqdm(dataloaders[phase], disable=not verbose)):
-                
+
                 # put data/labels on device
                 inputs = inputs.to(device)
                 x_targets = x_targets.to(device)
@@ -230,22 +242,25 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                     # get model outputs and loss
                     outputs = model(inputs)
                     loss = criterion(outputs, x_targets, y_targets)
-
                     # backpropogate
                     if phase == 'train':
+                        if args.clip > 0:
+                            torch.nn.clip_grad_norm_([p for p in model.parameters()] + [lv for lv in criterion.log_vars], args.clip)
                         loss.backward()
                         optimizer.step()
 
-                    # get running loss sum and running sqared error sum (in km) for the X and Y components of location
-                    running_loss += loss.item()*inputs.size(0)*outputs.size(1)
-                    running_x_sq_error += F.mse_loss(outputs[:,[0]] * max_x / 1000, x_targets * max_x / 1000, reduction='sum')
-                    running_y_sq_error += F.mse_loss(outputs[:,[1]] * max_y / 1000, y_targets * max_y / 1000, reduction='sum')
-                
-                    if (not args.no_wb) and phase == 'train':
-                        step_metrics = {"train/train_loss" : loss,
-                                        "train/epoch" : (step + 1 + (n_steps_per_epoch * epoch)) / n_steps_per_epoch}
-                        if step + 1 < n_steps_per_epoch:
-                            wandb.log(step_metrics)
+                # get running loss sum and running sqared error sum (in km) for the X and Y components of location
+                running_loss += loss.item()*inputs.size(0) #*outputs.size(1)
+                running_x_sq_error += F.mse_loss(outputs[:,[0]] * max_x / 1000, x_targets * max_x / 1000, reduction='sum')
+                running_y_sq_error += F.mse_loss(outputs[:,[1]] * max_y / 1000, y_targets * max_y / 1000, reduction='sum')
+            
+                if (not args.no_wb) and phase == 'train':
+                    step_metrics = {"train/train_loss" : loss,
+                                    "train/epoch" : (step + 1 + (n_steps_per_epoch * epoch)) / n_steps_per_epoch,
+                                    "train/LVx" : criterion.log_vars[0],
+                                    "train/LVy" : criterion.log_vars[1]}
+                    if step + 1 < n_steps_per_epoch:
+                        wandb.log(step_metrics)
 
             # calculate epoch statistics
             epoch_loss = running_loss / dataloaders[phase].batch_sampler.num_samples
@@ -266,18 +281,20 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                     wandb.log(val_metrics)
 
             # print epoch information
-            print("{} Loss: {:.4f} -- X_RMSE: {:.4f} km -- Y_RMSE: {:.4f} km".format(phase, epoch_loss, torch.sqrt(epoch_x_mse), torch.sqrt(epoch_y_mse)))
+            print("{} Loss: {:.4f} -- X_RMSE: {:.4f} km -- Y_RMSE: {:.4f} km -- LVx: {:.4f} -- LVy: {:.4f}".format(phase, epoch_loss, torch.sqrt(epoch_x_mse), torch.sqrt(epoch_y_mse), criterion.log_vars[0], criterion.log_vars[1]))
 
             # check if we update best model
             if phase == 'val' and ((epoch_x_mse + epoch_y_mse) / 2) < best_mse:
                 best_mse = ((epoch_x_mse + epoch_y_mse) / 2)
                 best_model_wts = copy.deepcopy(get_model_state_dict(model))
                 best_opt_state = copy.deepcopy(optimizer.state_dict())
+                best_log_vars = copy.deepcopy(ctierion.log_vars)
             
-            # append to histories and save model weights if saving all epochs
+            # save model weights if saving all epochs
             if phase == 'train' and save_all_epochs:
                 torch.save({"model_state_dict" : get_model_state_dict(model),
-                            "optimizer_state_dict" : optimizer.state_dict()},
+                            "optimizer_state_dict" : optimizer.state_dict(),
+                            "log_vars" : criterion.log_vars},
                             os.path.join(save_dir, f'weights_{epoch}.pt'))
 
         # new line after train/val cycle
@@ -291,13 +308,15 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
 
     # save best model weights
     torch.save({"model_state_dict" : best_model_wts,
-                "optimizer_state_dict" : best_opt_state},
+                "optimizer_state_dict" : best_opt_state,
+                "log_vars" : best_log_vars},
                 os.path.join(save_dir, f'weights_best.pt'))
 
     # if we're not saving every epoch, save the last one
     if not save_all_epochs:
         torch.save({"model_state_dict" : get_model_state_dict(model),
-                    "optimizer_state_dict" : optimizer.state_dict()},
+                    "optimizer_state_dict" : optimizer.state_dict(),
+                    "log_vars" : criterion.log_vars},
                     os.path.join(save_dir, f'weights_{epoch}.pt'))
 
 if __name__ == "__main__":
