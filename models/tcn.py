@@ -83,37 +83,50 @@ class FusionTemporalConvNet(nn.Module):
     TCN with multi-input fusion.
     """
 
-    def __init__(self, num_inputs, input_channels, num_channels, kernel_size=2, dropout=0.2):
+    def __init__(self, num_inputs, num_outputs, input_channels, num_channels, kernel_size=2, dropout=0.2):
         super(FusionTemporalConvNet, self).__init__()
-        # layers to fuse inputs
+
+        # save number of input/outputs branches
+        self.num_inputs = num_inputs
+        self.num_outputs = num_outputs
+        
+        # layers to fuse inputs. each are a separate TemporalBlock.
         self.fusion_layers = nn.ModuleList([TemporalBlock(input_channels, num_channels[0], kernel_size, stride=1, dilation=1,
                             padding=(kernel_size-1) * 1, dropout=dropout) for _ in range(num_inputs)])
-        self.num_inputs = num_inputs
-        # tcn
+        
+        # tcn for levels 1 --> num_levels-1
         layers = []
         num_levels = len(num_channels)
-        for i in range(1, num_levels):
+        for i in range(1, num_levels-1):
             dilation_size = 2 ** i
             in_channels = self.num_inputs * num_channels[0] if i == 1 else num_channels[i-1]
             out_channels = num_channels[i]
             layers += [TemporalBlock(in_channels, out_channels, kernel_size, stride=1, dilation=dilation_size,
                                      padding=(kernel_size-1) * dilation_size, dropout=dropout)]
 
+        # network core
         self.network = nn.Sequential(*layers)
+
+        # separate branche for the last layer before output
+        i = num_levels-1
+        dilation_size = 2 ** i
+        in_channels = num_channels[i-1]
+        out_channels = num_channels[i]
+        self.ends = nn.ModuleList([TemporalBlock(in_channels, out_channels, kernel_size, stride=1, dilation=dilation_size,
+                                     padding=(kernel_size-1) * dilation_size, dropout=dropout) for _ in range(num_outputs)])
 
     def forward(self, x):
         # fuse inputs
         fusion_outs = [self.fusion_layers[i](x[:,i,...]) for i in range(self.num_inputs)]
-        # fusion_out1 = self.fusion_layers[0](x[:,0,...])
-        # fusion_out2 = self.fusion_layers[1](x[:,1,...])
-        # fusion_out3 = self.fusion_layers[2](x[:,2,...])
         
         # concatenate channels
-        # x = torch.cat((fusion_out1, fusion_out2, fusion_out3), dim=1)
         x = torch.cat(fusion_outs, dim=1)
 
         # run through rest of TCN layers
-        return self.network(x)
+        x = self.network(x)
+
+        # return list of results from all output brances
+        return [self.ends[i](x) for i in range(self.num_outputs)]
 
 ##################################################################
 #                           TCN Models                           #
@@ -124,11 +137,18 @@ class FusionTCN(nn.Module):
     TCN with multi-input fusion and a linear output layer.
     """
 
-    def __init__(self, num_inputs, input_size, output_size, num_channels, kernel_size, dropout):
+    def __init__(self, num_inputs, num_outputs, input_size, output_size, num_channels, kernel_size, dropout):
         super(FusionTCN, self).__init__()
-        self.tcn = FusionTemporalConvNet(num_inputs, input_size, num_channels, kernel_size=kernel_size, dropout=dropout)
-        self.linear = nn.Linear(num_channels[-1], output_size)
+        
+        # make sure we can construct the output branches
+        assert not output_size % num_outputs, "'output_size' must be divisible by 'num_outputs'."
+
+        self.tcn = FusionTemporalConvNet(num_inputs, num_outputs, input_size, num_channels, kernel_size=kernel_size, dropout=dropout)
+        self.linear1 = nn.Linear(num_channels[-1], output_size // num_outputs)
+        self.linear2 = nn.Linear(num_channels[-1], output_size // num_outputs)
 
     def forward(self, inputs):
         x = self.tcn(inputs)
-        return self.linear(x[:,:,-1])
+        x1 = self.linear1(x[0][:,:,-1])
+        x2 = self.linear2(x[1][:,:,-1])
+        return torch.cat((x1, x2), dim=1)
