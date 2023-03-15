@@ -80,7 +80,7 @@ class SimData(data.Dataset):
         # get labels
         x_target = self._from_numpy(self.inputs['labels'][[idx],1]) / self.max_x
         y_target = self._from_numpy(self.inputs['labels'][[idx],0]) / self.max_y
-
+        
         return inputs, x_target, y_target
 
     def __len__(self):
