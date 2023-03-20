@@ -13,7 +13,7 @@ import torch.nn.functional as F
 
 from datasets.dataloaders import get_dataloaders
 from utils.transformations import get_image_transform
-from models.tcn import FusionTCN
+from models.fusion_tcn import FusionTCN
 from losses.uncertainty_losses import UncertainLocLoss
 
 # load config file
@@ -32,8 +32,8 @@ parser.add_argument('--lr', type=float, default=1e-4,
                     help='initial learning rate (default: 1e-4)')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed (default: 1111)')
-parser.add_argument('--levels', type=int, default=8,
-                    help='number of TCN blocks including (fusion default: 8)')
+parser.add_argument('--channels', type=int, nargs='+', default=[250] + [500] + 6*[368],
+                    help='number of TCN blocks including (fusion default: [250] + 7*[500])')
 parser.add_argument('--kernel_size', type=int, default=6,
                     help='size of 1D kernel (default: 6)')
 parser.add_argument('--dropout', type=float, default=0.2,
@@ -84,7 +84,8 @@ if not args.no_wb:
             "nfft" : config['stft']['nfft'],
             "max_x" : config['scaling']['max_x'],
             "max_y" : config['scaling']['max_y'],
-            "checkpoint_directory" : args.checkpoint_dir
+            "checkpoint_directory" : args.checkpoint_dir,
+            "num_channels" : args.channels,
         },
         id=args.wb_id,
         resume= True if args.wb_id is not None else False
@@ -128,7 +129,7 @@ model = FusionTCN(num_inputs=dl['train'].dataset.num_TOSSITs,
                 num_outputs=2,
                 input_size=dl['train'].dataset.size[0], 
                 output_size=2,
-                num_channels=[250] + [500] + [368]*(args.levels-2),
+                num_channels=args.channels,
                 kernel_size=args.kernel_size,
                 dropout=args.dropout).to(device)
 
@@ -250,7 +251,7 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                         optimizer.step()
 
                 # get running loss sum and running sqared error sum (in km) for the X and Y components of location
-                running_loss += loss.item()*inputs.size(0) #*outputs.size(1)
+                running_loss += loss.item()*inputs.size(0)
                 running_x_sq_error += F.mse_loss(outputs[:,[0]] * max_x / 1000, x_targets * max_x / 1000, reduction='sum')
                 running_y_sq_error += F.mse_loss(outputs[:,[1]] * max_y / 1000, y_targets * max_y / 1000, reduction='sum')
             
@@ -288,7 +289,7 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                 best_mse = ((epoch_x_mse + epoch_y_mse) / 2)
                 best_model_wts = copy.deepcopy(get_model_state_dict(model))
                 best_opt_state = copy.deepcopy(optimizer.state_dict())
-                best_log_vars = copy.deepcopy(ctierion.log_vars)
+                best_log_vars = copy.deepcopy(criterion.log_vars)
             
             # save model weights if saving all epochs
             if phase == 'train' and save_all_epochs:
