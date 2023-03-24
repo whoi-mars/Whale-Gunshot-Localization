@@ -133,4 +133,5 @@ def get_dataloaders(splits, batch_size, shuffle=True, transform=None, squeeze=Fa
     # prepare dataloaders
     dataloaders = {x : data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, shuffle=False if x != 'train' else shuffle)) for x in data_transform.keys()}
 
+    # return dataloaders
     return dataloaders
