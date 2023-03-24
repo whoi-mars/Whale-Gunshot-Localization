@@ -32,7 +32,7 @@ parser.add_argument('--lr', type=float, default=1e-4,
                     help='initial learning rate (default: 1e-4)')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed (default: 1111)')
-parser.add_argument('--channels', type=int, nargs='+', default=[250] + [500] + 6*[368],
+parser.add_argument('--channels', type=int, nargs='+', default=[250, 800, 500] + 5*[368],
                     help='number of TCN blocks including (fusion default: [250] + 7*[500])')
 parser.add_argument('--kernel_size', type=int, default=6,
                     help='size of 1D kernel (default: 6)')
