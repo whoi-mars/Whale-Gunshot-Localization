@@ -105,7 +105,8 @@ class ImbalancedH5BatchSampler(data.Sampler):
         which correspond to a particular bin
     bin_samp_len_list : List[int]
         number of indices to sample from each bin
-    """ 
+    """
+
     def __init__(self, split, batch_size, grid_dims, drop_last=False):
         """
         Construct attributes.
@@ -223,8 +224,44 @@ class ImbalancedH5BatchSampler(data.Sampler):
         return self.__batch_length
 
 class UniformGridH5BatchSampler(data.Sampler):
+    """
+    Batch sampler which divides the X/Y locations into 2d bins and samples to
+    make the distribution of X/Y locations as uniform as possible.
+
+    ...
+
+    Attributes
+    ----------
+    idx : array-like
+        index list to sample from
+    batch_size : int
+        samples per batch
+    drop_last : bool
+        whether or not to drop remainder after last batch is taken
+    num_sampes : int
+        number of samples in split
+    bin_lists : List[array-like]
+        a list of lists where each of the sublist contain indices of X/Y labels
+        which correspond to a particular bin
+    sample_map : array-like
+        array containing how many samples to draw from each list in bin_lists
+    """
 
     def __init__(self, split, batch_size, grid_dims, drop_last=False):
+        """
+        Construct attributes.
+
+        Parameters
+        ----------
+        split : str
+            name of the data split ('train', 'test', or 'val')
+        batch_size : int
+            samples per batch
+        grid_dims : tuple
+            2-D tuple that specifies how the grid cells are layed out
+        drop_last : bool
+            whether or not to drop remainder after last batch is taken
+        """
 
         self.idx = np.load(config['dataset']['data_directory'] + f'/{split}_indices.npy', allow_pickle=True)
         self.batch_size = batch_size
@@ -249,7 +286,34 @@ class UniformGridH5BatchSampler(data.Sampler):
         return torch.split(torch.tensor(indices), size)
 
     def _calc_bin_samples(self, grid_dims):
+        """
+        Solves a simple convex optimization problem to figure out how to
+        sample from each of the grid cells in order to make the distributions
+        of X and Y locations as uniform as possible. The problem we solve is
 
+        min c
+        s.t. Ax == b
+             x[zero_inds] == 0
+             x[non_zero_inds] >= x_target - c*x_target
+             x[non_zero_inds] <= x_target + c*x_target.
+
+        This constrains the sums of every row/column to form approximately uniform distributions
+        w.r.t. X/Y locations, ensures that empty bins remain at zero, and try to make the number of
+        samples taken from each bin to be as similar as possible.
+
+        Parameters
+        ----------
+        grid_dims : tuple
+            number of bins in the X/Y dimensions to overlay onto the locations grid, (# Y, # X) 
+        
+        Returns
+        -------
+        sample_map : array-like
+            list how how many samples to draw from each binned index list in 'bin_lists'
+        bin_lists : List[array-like]
+            list of sublists, each of which contain indices of the split which correspond to a particular X/Y location bin
+        """
+        
         # get indices to sort idx
         idx_sort = self.idx.argsort()
 
@@ -340,8 +404,6 @@ class UniformGridH5BatchSampler(data.Sampler):
         sample_map = np.delete(sample_map, np.where(counts_flat == 1)).astype(int)
 
         return sample_map, bin_lists
-
-             
 
     def __iter__(self):
         """

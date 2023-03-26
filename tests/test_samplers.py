@@ -83,6 +83,7 @@ class TestUniformGridH5BatchSampler(unittest.TestCase):
     def test_test(self):
         h5bs = UniformGridH5BatchSampler(split='train', batch_size=128, grid_dims=(10, 10))
         print(next(iter(h5bs)))
+        return True
 
 def suite():
     suite = unittest.TestSuite()
