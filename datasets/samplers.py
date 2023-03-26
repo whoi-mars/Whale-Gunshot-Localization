@@ -4,6 +4,8 @@ import yaml
 import numpy as np
 import h5py
 from scipy.stats import binned_statistic_2d
+import cvxpy as cp
+import matplotlib.pyplot as plt
 
 import torch
 from torch.utils import data
@@ -53,7 +55,7 @@ class H5BatchSampler(data.Sampler):
         self.shuffle = shuffle
         self.drop_last = drop_last
         self.num_samples = len(self.idx)
-        self.__batch_length = len(self.idx) // self.batch_size if self.drop_last else math.ceil(len(self.idx) / self.batch_size)
+        self.__batch_length = self.num_samples // self.batch_size if self.drop_last else math.ceil(self.num_samples / self.batch_size)
         self._divisible = (self.num_samples % self.batch_size == 0)
 
     def _chunk(self, indices, size):
@@ -124,16 +126,16 @@ class ImbalancedH5BatchSampler(data.Sampler):
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.num_samples = len(self.idx)
-        self.__batch_length = len(self.idx) // self.batch_size if self.drop_last else math.ceil(len(self.idx) / self.batch_size)
+        self.__batch_length = self.num_samples // self.batch_size if self.drop_last else math.ceil(self.num_samples / self.batch_size)
         self._divisible = (self.num_samples % self.batch_size == 0)
 
         self.bin_lists, self.bin_samp_len_list = self._bin_examples(grid_dims)
 
+        # make sure grid_dims is valid
+        assert isinstance(grid_dims, tuple) and len(grid_dims) == 2, "grid_dims must be a tuple of length 2"
+
         # make sure a batch can have samples from all bins
         assert (self.batch_size / math.prod(grid_dims)) > 1, "Number of grid cells is larger than batch size"
-
-        # make sure grid_dims is valid
-        assert grid_dim is tuple and len(grid_dim) == 2, "grid_dims must be a tuple of length 2"
 
     def _chunk(self, indices, size):
         """
@@ -217,5 +219,163 @@ class ImbalancedH5BatchSampler(data.Sampler):
 
         return iter(all_batches)
     
+    def __len__(self):
+        return self.__batch_length
+
+class UniformGridH5BatchSampler(data.Sampler):
+
+    def __init__(self, split, batch_size, grid_dims, drop_last=False):
+
+        self.idx = np.load(config['dataset']['data_directory'] + f'/{split}_indices.npy', allow_pickle=True)
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.num_samples = len(self.idx)
+        self.__batch_length = self.num_samples // self.batch_size if self.drop_last else math.ceil(self.num_samples / self.batch_size)
+        self._divisible = (self.num_samples % self.batch_size == 0)
+
+        self.sample_map, self.bin_lists = self._calc_bin_samples(grid_dims)
+
+        # make sure grid_dims is valid
+        assert isinstance(grid_dims, tuple) and len(grid_dims) == 2, "grid_dims must be a tuple of length 2"
+
+        # make sure a batch can have samples from all bins
+        assert (self.batch_size / math.prod(grid_dims)) > 1, "Number of grid cells is larger than batch size"
+
+    def _chunk(self, indices, size):
+        """
+        Splits indices into groups with number of elements specified by size and a remainder group.
+        """
+
+        return torch.split(torch.tensor(indices), size)
+
+    def _calc_bin_samples(self, grid_dims):
+
+        # get indices to sort idx
+        idx_sort = self.idx.argsort()
+
+        # get indices to unsort idx
+        idx_unsort = np.empty_like(idx_sort)
+        idx_unsort[idx_sort] = np.arange(idx_sort.size)
+
+        # get location labels
+        with h5py.File(config['dataset']['data_directory'] + "/VDS_main.h5", 'r') as f:
+            y_locs = f['labels'][self.idx[idx_sort],0][idx_unsort]
+            x_locs = f['labels'][self.idx[idx_sort],1][idx_unsort]
+
+        # plt.figure()
+        # plt.hist(y_locs, bins='auto')
+        # plt.savefig("y_orig.jpg")
+        # plt.figure()
+        # plt.hist(x_locs, bins='auto')
+        # plt.savefig("x_orig.jpg")
+
+        # get bins
+        ret = binned_statistic_2d(y_locs,
+                                  x_locs,
+                                  None,
+                                  'count',
+                                  bins=list(grid_dims[::-1]))
+        
+        # group indices by bin
+        bins = ret.binnumber
+        unique_bins = sorted(set(bins))
+        bin_lists = [self.idx[bins == b] for b in unique_bins]
+        
+        # get counts statistic
+        counts = ret.statistic
+
+        # flatten counts
+        counts_flat = counts.flatten('C')
+
+        # construct main equality constraint matrix
+        inds = np.arange(len(counts_flat)).reshape(counts.shape)
+        inds = np.concatenate((inds, inds.T), axis=0)
+
+        A = np.zeros((sum(counts.shape), math.prod(counts.shape)))
+        b = np.zeros((sum(counts.shape),))
+
+        for i in range(A.shape[0]):
+            A[i, inds[i,:]] = counts_flat[inds[i,:]]
+
+        b[:counts.shape[0]-1] = self.num_samples // counts.shape[0]
+        b[counts.shape[0]-1] = b[counts.shape[0]-2] + (self.num_samples % counts.shape[0])
+        b[counts.shape[0]:counts.shape[0] + counts.shape[1]-1] = self.num_samples // counts.shape[1]
+        b[counts.shape[0] + counts.shape[1]-1] = b[counts.shape[0] + counts.shape[1]-2] + (self.num_samples % counts.shape[1])
+
+        # set up optimization problem
+        # get zero and nonzero indieces of counts
+        zero_inds = np.nonzero(counts_flat == 0)
+        non_zero_inds = np.nonzero(counts_flat)
+
+        # decision variables
+        x = cp.Variable(shape=len(counts_flat))
+        c = cp.Variable(shape=1)
+
+        # set up constraints
+        num_samp_target = counts_flat.sum() / ((counts_flat != 0).sum())
+        counts_flat[counts_flat == 0] = 1
+        x_target = num_samp_target / counts_flat
+        constraints = [A@x == b,
+                       x[zero_inds] == 0,
+                       x[non_zero_inds] <= (x_target[non_zero_inds] + c*x_target[non_zero_inds]),
+                       x[non_zero_inds] >= (x_target[non_zero_inds] - c*x_target[non_zero_inds])]  
+
+        # set up objective
+        obj = cp.Minimize(c)
+
+        # solve problem
+        prob = cp.Problem(obj, constraints)
+        res = prob.solve()
+        
+        # get sample numbers
+        sample_map = np.ceil(counts_flat*x.value)
+
+        # eliminate extra
+        extra = sample_map.sum() - counts.sum()
+        while extra > 0:
+            ind_max = sample_map.argmax()
+            sample_map[ind_max] -= 1
+            extra -= 1
+
+        sample_map = np.delete(sample_map, np.where(counts_flat == 1)).astype(int)
+
+        return sample_map, bin_lists
+
+             
+
+    def __iter__(self):
+        """
+        Make batches iterator
+        """
+
+        # sample epoch
+        all_batches = np.concatenate([np.random.choice(bl, size=samps) for (bl, samps) in zip(self.bin_lists, self.sample_map)])
+
+        # get location labels
+        # with h5py.File(config['dataset']['data_directory'] + "/VDS_main.h5", 'r') as f:
+        #     y_locs = f['labels'][:,0]
+        #     x_locs = f['labels'][:,1]
+
+        # y_locs = y_locs[all_batches]
+        # x_locs = x_locs[all_batches]
+
+        # plt.figure()
+        # plt.hist(y_locs, bins='auto')
+        # plt.savefig("y.jpg")
+        # plt.figure()
+        # plt.hist(x_locs, bins='auto')
+        # plt.savefig("x.jpg")
+
+        # shuffle
+        np.random.shuffle(all_batches)
+        
+        # make batches
+        all_batches = list(self._chunk(self.idx, self.batch_size))
+        if self.drop_last and not self._divisible:
+            all_batches.pop()
+        all_batches = [batch.tolist() for batch in all_batches]
+
+        return iter(all_batches)
+
     def __len__(self):
         return self.__batch_length

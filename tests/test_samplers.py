@@ -5,7 +5,7 @@ import unittest
 import yaml
 import numpy as  np
 
-from datasets.samplers import H5BatchSampler
+from datasets.samplers import H5BatchSampler, ImbalancedH5BatchSampler, UniformGridH5BatchSampler
 
 # load config file
 with open("config.yaml", 'r') as yaml_file:
@@ -69,6 +69,28 @@ class TestH5BatchSampler(unittest.TestCase):
         h5bs = list(H5BatchSampler(split='train', batch_size=len(train_indices), shuffle=True))[0]
         assert(h5bs != train_indices)
 
+# TODO
+class TestImbalancedH5BatchSampler(unittest.TestCase):
+
+    def test_test(self):
+        h5bs = ImbalancedH5BatchSampler(split='train', batch_size=128, grid_dims=(10, 10))
+        next(iter(h5bs))
+        return True
+
+# TODO
+class TestUniformGridH5BatchSampler(unittest.TestCase):
+
+    def test_test(self):
+        h5bs = UniformGridH5BatchSampler(split='train', batch_size=128, grid_dims=(10, 10))
+        print(next(iter(h5bs)))
+
+def suite():
+    suite = unittest.TestSuite()
+    suite.addTest(TestH5BatchSampler)
+    suite.addTest(TestImbalancedH5BatchSampler)
+    suite.addTest(TestUniformGridH5BatchSampler)
+    return suite
 
 if __name__ == '__main__':
-    unittest.main()
+    runner = unittest.TextTestRunner()
+    runner.run(suite())
