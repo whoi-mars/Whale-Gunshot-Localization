@@ -13,35 +13,46 @@ with open("config.yaml", 'r') as yaml_file:
 
 class TestH5BatchSampler(unittest.TestCase):
 
+    def setUp(self):
+        
+        # load saved indices for splits
+        self.inds = [np.load(config['dataset']['data_directory'] + f'/{split}_indices.npy', allow_pickle=True) for split in ['train', 'val', 'test']]
+        
+        # trim to 1000 so that the tests run quicker
+        self.inds = [split[:1000] if len(split) > 1000 else split for split in self.inds]
+
     def test_train_indices(self):
-        if os.path.isfile(config['dataset']['data_directory'] + '/train_indices.npy'):
-            h5bs = H5BatchSampler(split='train', batch_size=1)
-            train_indices = np.load(config['dataset']['data_directory'] + '/train_indices.npy', allow_pickle=True)
-            h5bs_list = [idx for batch in list(h5bs) for idx in batch]
-            assert(all(x in h5bs_list for x in train_indices))
-        else:
-            warnings.warn("No train indices saved.")
-            assert(True)
+        h5bs = H5BatchSampler(split='train', batch_size=1)
+
+        # trim object indices to 1000 to match those in setUp
+        if len(h5bs.idx) > 1000:
+            h5bs.idx = h5bs.idx[:1000]
+
+        train_indices = self.inds[0]
+        h5bs_list = [idx for batch in list(h5bs) for idx in batch]
+        assert(all(x in h5bs_list for x in train_indices))
 
     def test_val_indices(self):
-        if os.path.isfile(config['dataset']['data_directory'] + '/val_indices.npy'):
-            h5bs = H5BatchSampler(split='val', batch_size=1)
-            val_indices = np.load(config['dataset']['data_directory'] + '/val_indices.npy', allow_pickle=True)
-            h5bs_list = [idx for batch in list(h5bs) for idx in batch]
-            assert(all(x in h5bs_list for x in val_indices))
-        else:
-            warnings.warn("No validation indices saved.")
-            assert(True)
+        h5bs = H5BatchSampler(split='val', batch_size=1)
+
+        # trim object indices to 1000 to match those in setUp
+        if len(h5bs.idx) > 1000:
+            h5bs.idx = h5bs.idx[:1000]
+
+        val_indices = self.inds[1]
+        h5bs_list = [idx for batch in list(h5bs) for idx in batch]
+        assert(all(x in h5bs_list for x in val_indices))
 
     def test_test_indices(self):
-        if os.path.isfile(config['dataset']['data_directory'] + '/test_indices.npy'):
-            h5bs = H5BatchSampler(split='test', batch_size=1)
-            test_indices = np.load(config['dataset']['data_directory'] + '/test_indices.npy', allow_pickle=True)
-            h5bs_list = [idx for batch in list(h5bs) for idx in batch]
-            assert(all(x in h5bs_list for x in test_indices))
-        else:
-            warnings.warn("No test indices saved.")
-            assert(True)
+        h5bs = H5BatchSampler(split='test', batch_size=1)
+
+        # trim object indices to 1000 to match those in setUp
+        if len(h5bs.idx) > 1000:
+            h5bs.idx = h5bs.idx[:1000]
+
+        test_indices = self.inds[2]
+        h5bs_list = [idx for batch in list(h5bs) for idx in batch]
+        assert(all(x in h5bs_list for x in test_indices))
     
     def test_batch_size(self):
         batch_sizes = [1, 10, 13, 16, 500]
