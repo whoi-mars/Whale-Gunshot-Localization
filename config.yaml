@@ -11,9 +11,9 @@ stft:
   noverlap: 56
   nfft: 463
 scaling:
-  max_x: 8964.86 # [m]
-  min_x: -12206.00 # [m]
-  max_y: 10563.48 # [m]
-  min_y: -3984.47 # [m]
+  max_x: 8982.512857 # [m]
+  min_x: -12230.036736 # [m]
+  max_y: 24555.467997 # [m]
+  min_y: -3984.472166 # [m]
 models:
   checkpoints_directories: "/workspace/data/models"
