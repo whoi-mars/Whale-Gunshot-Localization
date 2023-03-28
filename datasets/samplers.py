@@ -5,7 +5,7 @@ import numpy as np
 import h5py
 from scipy.stats import binned_statistic_2d
 import cvxpy as cp
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 import torch
 from torch.utils import data
@@ -379,10 +379,15 @@ class UniformGridH5BatchSampler(data.Sampler):
         num_samp_target = counts_flat.sum() / ((counts_flat != 0).sum())
         counts_flat[counts_flat == 0] = 1
         x_target = num_samp_target / counts_flat
-        constraints = [A@x == b,
-                       x[zero_inds] == 0,
-                       x[non_zero_inds] <= (x_target[non_zero_inds] + c*x_target[non_zero_inds]),
-                       x[non_zero_inds] >= (x_target[non_zero_inds] - c*x_target[non_zero_inds])]  
+        if zero_inds[0].size != 0:
+            constraints = [A@x == b,
+                        x[zero_inds] == 0,
+                        x[non_zero_inds] <= (x_target[non_zero_inds] + c*x_target[non_zero_inds]),
+                        x[non_zero_inds] >= (x_target[non_zero_inds] - c*x_target[non_zero_inds])]
+        else:
+            constraints = [A@x == b,
+                           x[non_zero_inds] <= (x_target[non_zero_inds] + c*x_target[non_zero_inds]),
+                           x[non_zero_inds] >= (x_target[non_zero_inds] - c*x_target[non_zero_inds])]    
 
         # set up objective
         obj = cp.Minimize(c)
