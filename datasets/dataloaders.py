@@ -5,7 +5,7 @@ from torch.utils import data
 import h5py
 
 from utils.transformations import to_spect
-from datasets.samplers import H5BatchSampler
+from datasets.samplers import H5BatchSampler, UniformGridH5BatchSampler
 
 # load config file
 with open("config.yaml", 'r') as yaml_file:
@@ -132,6 +132,52 @@ def get_dataloaders(splits, batch_size, shuffle=True, transform=None, squeeze=Fa
 
     # prepare dataloaders
     dataloaders = {x : data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, shuffle=False if x != 'train' else shuffle)) for x in data_transform.keys()}
+
+    # return dataloaders
+    return dataloaders
+
+def get_dataloaders_uniform_grid_train(splits, batch_size, grid_dims, transform=None, squeeze=False, num_workers=10):
+    """
+    Construct dictionary of dataloaders for splits ('train', 'val', 'test'). The 'train' split uses the UniformGridH5BatchSampler, and
+    the others use the nominal H5BatchSampler. By default, the train split shuffles and the others don't.
+
+    Parameters
+    ----------
+    splits : list[str]
+        list of desires splits to include in dataloaders dict
+    batch_size : int
+        number of elements per batch
+    transform : PyTorch Compose object
+        desired data transformations
+    squeeze : bool
+        whether or not to eliminate the singleton channel dimension        
+
+    Returns
+    -------
+    dataloaders : dict
+        dictionary of dataloaders for each split
+    """
+
+    assert all(x in ['train', 'val', 'test'] for x in splits), "Valid splits are 'train', 'val', and 'test'"
+
+    # prepare transforms
+    data_transform = dict()
+    for split in splits:
+        if split == 'train':
+            data_transform[split] = transform['train'] if transform is not None else transform
+        else:
+            data_transform[split] = transform['eval'] if transform is not None else transform
+
+    # prepare datasets
+    datasets = {x : SimData(transform=data_transform[x], squeeze=squeeze) for x in data_transform.keys()}
+
+    # prepare dataloaders
+    dataloaders = dict()
+    for x in data_transform.keys():
+        if x == 'train':
+            dataloaders[x] = data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=UniformGridH5BatchSampler(split=x, batch_size=batch_size, grid_dims=grid_dims))
+        else:
+            dataloaders[x] = data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, shuffle=False))
 
     # return dataloaders
     return dataloaders
