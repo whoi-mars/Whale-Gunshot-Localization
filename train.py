@@ -32,7 +32,7 @@ parser.add_argument('--lr', type=float, default=1e-4,
                     help='initial learning rate (default: 1e-4)')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed (default: 1111)')
-parser.add_argument('--channels', type=int, nargs='+', default=[250, 800, 500] + 5*[368],
+parser.add_argument('--channels', type=int, nargs='+', default=[250, 1500, 750] + 3*[368],
                     help='number of TCN blocks including (fusion default: [250] + 7*[500])')
 parser.add_argument('--kernel_size', type=int, default=6,
                     help='size of 1D kernel (default: 6)')
@@ -142,15 +142,18 @@ if args.start_epoch > 1:
         raise ValueError("Desired start epoch does not have a corresponding set of saved model weights.")
     # load states if possible
     model.load_state_dict(checkpoint['model_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     log_var_list = checkpoint['log_vars']
+    # set loss
+    criterion = UncertainLocLoss(log_var_list=log_var_list).to(device)
+    # initialize optimizer
+    optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr, weight_decay=args.weight_decay)
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 else:
     log_var_list = None
-
-# set loss
-criterion = UncertainLocLoss(log_var_list=log_var_list).to(device)
-# initialize optimizer
-optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr, weight_decay=args.weight_decay)
+    # set loss
+    criterion = UncertainLocLoss(log_var_list=log_var_list).to(device)
+    # initialize optimizer
+    optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr, weight_decay=args.weight_decay)
 
 # data parallel
 if args.DP:
