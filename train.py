@@ -86,6 +86,9 @@ if not args.no_wb:
             "max_y" : config['scaling']['max_y'],
             "checkpoint_directory" : args.checkpoint_dir,
             "num_channels" : args.channels,
+            "dropout" : args.dropout,
+            "weight_decay" : args.weight_decay,
+            "clip" : args.clip,
         },
         id=args.wb_id,
         resume= True if args.wb_id is not None else False
