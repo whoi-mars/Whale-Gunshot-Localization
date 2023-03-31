@@ -17,3 +17,6 @@ class TestNormalize1DChannel(unittest.TestCase):
         x = norm(x)
         assert(torch.sum(torch.mean(x, dim=3) > 1e-6).item() == 0)
         assert(torch.sum(torch.std(x, dim=3)).item() == torch.numel(x[:,:,:,0]))
+
+if __name__ == '__main__':
+    unittest.main()
