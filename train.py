@@ -32,7 +32,7 @@ parser.add_argument('--lr', type=float, default=1e-4,
                     help='initial learning rate (default: 1e-4)')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed (default: 1111)')
-parser.add_argument('--channels', type=int, nargs='+', default=[250, 1500, 750] + 3*[368],
+parser.add_argument('--channels', type=int, nargs='+', default=[250, 1500, 750] + 5*[368],
                     help='number of TCN blocks including (fusion default: [250] + 7*[500])')
 parser.add_argument('--kernel_size', type=int, default=6,
                     help='size of 1D kernel (default: 6)')
@@ -110,10 +110,13 @@ np.random.seed(args.seed)
 # get dataloaders
 dl = get_dataloaders(splits=['train', 'val'],
                     batch_size=args.batch_size,
+                    drop_last=True,
                     shuffle=True,
                     transform=get_image_transform(),
                     squeeze=True,
-                    num_workers=20)
+                    num_workers=10,
+                    pin_memory=True,
+                    prefetch_factor=5)
 n_steps_per_epoch = len(dl['train'])
 
 # get label scaling constants for error calculations
@@ -258,14 +261,20 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
 
                 # get running loss sum and running sqared error sum (in km) for the X and Y components of location
                 running_loss += loss.item()*inputs.size(0)
-                running_x_sq_error += F.mse_loss(outputs[:,[0]] * max_x / 1000, x_targets * max_x / 1000, reduction='sum')
-                running_y_sq_error += F.mse_loss(outputs[:,[1]] * max_y / 1000, y_targets * max_y / 1000, reduction='sum')
+
+                # get running square error for whole epoch
+                x_mse = F.mse_loss(outputs[:,[0]] * max_x / 1000, x_targets * max_x / 1000, reduction='none')
+                y_mse = F.mse_loss(outputs[:,[1]] * max_y / 1000, y_targets * max_y / 1000, reduction='none')
+                running_x_sq_error += x_mse.sum()
+                running_y_sq_error += y_mse.sum()
             
                 if (not args.no_wb) and phase == 'train':
                     step_metrics = {"train/train_loss" : loss,
                                     "train/epoch" : (step + 1 + (n_steps_per_epoch * epoch)) / n_steps_per_epoch,
                                     "train/LVx" : criterion.log_vars[0],
-                                    "train/LVy" : criterion.log_vars[1]}
+                                    "train/LVy" : criterion.log_vars[1],
+                                    "train/x_sq_error" : x_mse.mean(),
+                                    "train/y_sq_error" : y_mse.mean(),}
                     if step + 1 < n_steps_per_epoch:
                         wandb.log(step_metrics)
 
