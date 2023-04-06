@@ -26,7 +26,7 @@ def to_spect(x):
     """
 
     # calculate STFTs
-    [f, t, Z] = stft(x, 
+    [_, _, Z] = stft(x, 
                     fs=config['signal']['fs'], 
                     window=config['stft']['window'], 
                     nperseg=config['stft']['nperseg'], 
@@ -35,7 +35,7 @@ def to_spect(x):
                     axis=-1)
 
     # get dB power
-    log_spect = 10*np.log10(np.abs(Z)**2)
+    log_spect = 10*np.log10(np.abs(Z) ** 2)
 
     # get dimension where to flip the result and add channel dimension
     channel_dim = len(log_spect.shape) - 2
