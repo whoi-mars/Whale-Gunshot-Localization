@@ -90,11 +90,11 @@ class SimData(data.Dataset):
         return torch.as_tensor(tensor).float()
 
     def _load_h5(self):
-        file = h5py.File(config['dataset']['data_directory'] + "/VDS_main.h5", 'r')
+        file = h5py.File(config['dataset']['data_directory'] + "/VDS_main.h5", 'r', libver='latest')
         return dict(data=file['data'], labels=file['labels'])
 
 
-def get_dataloaders(splits, batch_size, shuffle=True, transform=None, squeeze=False, num_workers=10):
+def get_dataloaders(splits, batch_size, shuffle=True, drop_last=False, transform=None, squeeze=False, num_workers=10, pin_memory=False, prefetch_factor=2):
     """
     Construct dictionary of dataloaders for splits ('train', 'val', 'test').
 
@@ -131,7 +131,7 @@ def get_dataloaders(splits, batch_size, shuffle=True, transform=None, squeeze=Fa
     datasets = {x : SimData(transform=data_transform[x], squeeze=squeeze) for x in data_transform.keys()}
 
     # prepare dataloaders
-    dataloaders = {x : data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, shuffle=False if x != 'train' else shuffle)) for x in data_transform.keys()}
+    dataloaders = {x : data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, drop_last=drop_last, shuffle=False if x != 'train' else shuffle), pin_memory=pin_memory, prefetch_factor=prefetch_factor if num_workers > 0 else None) for x in data_transform.keys()}
 
     # return dataloaders
     return dataloaders
