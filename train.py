@@ -115,8 +115,7 @@ dl = get_dataloaders(splits=['train', 'val'],
                     transform=get_image_transform(),
                     squeeze=True,
                     num_workers=10,
-                    pin_memory=True,
-                    prefetch_factor=5)
+                    pin_memory=True)
 n_steps_per_epoch = len(dl['train'])
 
 # get label scaling constants for error calculations
