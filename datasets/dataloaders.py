@@ -48,11 +48,11 @@ class SimData(data.Dataset):
         super(SimData, self).__init__()
 
         # get data file
-        self.inputs = self._load_h5()
+        self.data, self.labels = self._load_h5()
 
         # get imsize
-        self.num_TOSSITs = self.inputs['data'].shape[1]
-        self.size = to_spect(self.inputs['data'][0]).shape[2:]
+        self.num_TOSSITs = self.data.shape[1]
+        self.size = to_spect(self.data[0]).shape[2:]
 
         # for scaling location labels
         self.max_x = config['scaling']['max_x']
@@ -64,7 +64,7 @@ class SimData(data.Dataset):
     def __getitem__(self, idx):
 
         # get data
-        inputs = self.inputs['data'][idx]
+        inputs = self.data[idx]
 
         # convert to spectrogram
         inputs = self._from_numpy(to_spect(inputs).copy())
@@ -78,20 +78,20 @@ class SimData(data.Dataset):
             inputs = inputs.squeeze()
 
         # get labels
-        x_target = self._from_numpy(self.inputs['labels'][[idx],1]) / self.max_x
-        y_target = self._from_numpy(self.inputs['labels'][[idx],0]) / self.max_y
+        x_target = self._from_numpy(self.labels[[idx],1]) / self.max_x
+        y_target = self._from_numpy(self.labels[[idx],0]) / self.max_y
         
         return inputs, x_target, y_target
 
     def __len__(self):
-        return self.inputs['data'].shape[0]
+        return self.data.shape[0]
     
     def _from_numpy(self, tensor):
-        return torch.as_tensor(tensor).float()
+        return torch.from_numpy(tensor).float()
 
     def _load_h5(self):
         file = h5py.File(config['dataset']['data_directory'] + "/VDS_main.h5", 'r', libver='latest')
-        return dict(data=file['data'], labels=file['labels'])
+        return file['data'], file['labels']
 
 
 def get_dataloaders(splits, batch_size, shuffle=True, drop_last=False, transform=None, squeeze=False, num_workers=10, pin_memory=False, prefetch_factor=2):
@@ -131,7 +131,7 @@ def get_dataloaders(splits, batch_size, shuffle=True, drop_last=False, transform
     datasets = {x : SimData(transform=data_transform[x], squeeze=squeeze) for x in data_transform.keys()}
 
     # prepare dataloaders
-    dataloaders = {x : data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, drop_last=drop_last, shuffle=False if x != 'train' else shuffle), pin_memory=pin_memory, prefetch_factor=prefetch_factor if num_workers > 0 else None) for x in data_transform.keys()}
+    dataloaders = {x : data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, drop_last=drop_last, shuffle=False if x != 'train' else shuffle), pin_memory=pin_memory, prefetch_factor=5) for x in data_transform.keys()}
 
     # return dataloaders
     return dataloaders
