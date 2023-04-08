@@ -39,7 +39,7 @@ csv_order = ["6470", "6468", "6471", "6474", "6476"];
 %-------------------------------------------------------------------------%
 
 % Number of TOSSITs
-num_TOSSITs = size(T, 2) / 3;
+num_TOSSITs = (size(T, 2) - 2) / 3;
 
 % number of rows
 num_rows = size(T, 1);
@@ -109,7 +109,8 @@ end
 %% SAVE SIGNALS
 
 % create matrix for saved signals
-signals = zeros(fs_desired*example_length, num_TOSSITs, num_rows, 'single'); 
+signals = zeros(fs_desired*example_length, num_TOSSITs, num_rows, 'single');
+labels = zeros(2, num_rows);
 
 % collect signals to save, reindexing so that the TOSSITs are in the same
 % order which was used for simulation
@@ -127,15 +128,23 @@ for j = 1:num_rows
         
         signals(:,i,num_rows) = y;
     end
+    
+    % save labels from csv
+    labels(1,j) = T(j, "Yloc").(1);
+    labels(2,j) = T(j, "Xloc").(1);
 end
 
 % get chunk size
 if num_rows > 1
-    chunk_size = [size(signals,[1 2]) 1];
+    data_chunk_size = [size(signals,[1 2]) 1];
+    label_chunk_size = [2];
 else
-    chunk_size = [size(signals,[1 2])];
+    data_chunk_size = [size(signals,[1 2])];
+    label_chunk_size = [2 1];
 end
 
 % save data
-h5create(file_path, "/data", size(signals), 'Datatype', 'single', 'ChunkSize', chunk_size);
+h5create(file_path, "/data", size(signals), 'Datatype', 'single', 'ChunkSize', data_chunk_size);
+h5create(file_path, "/labels", [2 num_rows], 'Datatype', 'double', 'ChunkSize', label_chunk_size);
 h5write(file_path, "/data", signals);
+h5write(file_path, "/labels", labels); 
