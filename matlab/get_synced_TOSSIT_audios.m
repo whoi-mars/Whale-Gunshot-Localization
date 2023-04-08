@@ -77,9 +77,12 @@ end
 
 % retrieve corresponding audio clip from each TOSSIT adjusted for clocks
 % not being synchronized
+course_offset = zeros(1, length(closest_xml_list));
+wav_paths = [source_file];
 for j = 1:length(closest_xml_list)
     % determine offset for this TOSSIT
     delta = start_time_source - closest_time_list(j);
+    course_offset(j+1) = seconds(delta);
     
     % warn if delta is very large
     if delta > duration(0,5,0)
@@ -89,6 +92,7 @@ for j = 1:length(closest_xml_list)
     % construct audio file path for current TOSSIT
     split_xml = split(closest_xml_list(j),".");
     wav_path = fullfile(base_dir,split_xml(1),split_xml(1) + "." + split_xml(2) + ".wav");
+    wav_paths = [wav_paths wav_path];
     
     % load audio snippet from TOSSIT which correspnds to source, accounting
     % for not being synchronized
@@ -139,14 +143,14 @@ sgt.FontSize = 30;
 
 % use spectrogram cross correlation to align other TOSSITs to source TOSSIT
 % signal
-result.deltas = zeros(1,length(TOSSIT_id_list));
+fine_offset = zeros(1,length(TOSSIT_id_list)+1);
 for t = 1:length(TOSSIT_id_list)
     % get shifted signal and number of samples shifted by
     [sig,I] = spectrogramCorr(result.source, result.("TOSSIT" + TOSSIT_id_list(t)), Nw, noverlap, nfft, result.fs);
     
     % save shifted signal and number of samples shifted by
     result.("TOSSIT" + TOSSIT_id_list(t) + "_synced") = sig;
-    result.deltas(t) = I;
+    fine_offset(t+1) = I / result.fs;
 end
 
 % source TOSSIT spectrogram
@@ -175,6 +179,21 @@ end
 % plot title
 sgt = sgtitle("Fine Synchronize");
 sgt.FontSize = 30;
+
+%%
+
+% get empty row to fill for csv and save TOSSIT order
+row = cell(1,3*(length(TOSSIT_id_list)+1));
+TOSSIT_order = [TOSSIT_id_source TOSSIT_id_list];
+
+% create row to copy/paste into csv
+row_idx = 1;
+for i = 1:length(wav_paths)
+    row{row_idx} = wav_paths{i};
+    row{row_idx+1} = timestamp + course_offset(i) - fine_offset(i) - window_delta;
+    row{row_idx+2} = 0;
+    row_idx = row_idx + 3;
+end
 
 %% FUNCTIONS
 
