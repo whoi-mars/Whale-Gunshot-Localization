@@ -3,6 +3,7 @@ import yaml
 import torch
 from torch.utils import data
 import h5py
+import numpy as np
 
 from utils.transformations import to_spect
 from datasets.samplers import H5BatchSampler, UniformGridH5BatchSampler
@@ -56,7 +57,9 @@ class SimData(data.Dataset):
 
         # for scaling location labels
         self.max_x = config['scaling']['max_x']
+        # self.min_x = config['scaling']['min_x']
         self.max_y = config['scaling']['max_y']
+        # self.min_y = config['scaling']['min_y']
 
         self.transform = transform
         self.squeeze = squeeze
@@ -80,6 +83,8 @@ class SimData(data.Dataset):
         # get labels
         x_target = self._from_numpy(self.labels[[idx],1]) / self.max_x
         y_target = self._from_numpy(self.labels[[idx],0]) / self.max_y
+        # x_target = (self._from_numpy(self.labels[[idx],1]) - self.min_x) / (self.max_x - self.min_x)
+        # y_target = (self._from_numpy(self.labels[[idx],0]) - self.min_y) / (self.max_y - self.min_y)
         
         return inputs, x_target, y_target
 
@@ -93,8 +98,38 @@ class SimData(data.Dataset):
         file = h5py.File(config['dataset']['data_directory'] + "/VDS_main.h5", 'r', libver='latest')
         return file['data'], file['labels']
 
+class ExpData(SimData):
+    """
+    Dataset class for simulated data.
 
-def get_dataloaders(splits, batch_size, shuffle=True, drop_last=False, transform=None, squeeze=False, num_workers=10, pin_memory=False, prefetch_factor=2):
+    ...
+
+    Attributes
+    ----------
+    inputs : HDF5 file
+        pointer to (simulated) data-containing HDF5 file
+    size : tuple
+        spectrogram shape
+    max_x : float
+        largest x location
+    max_y : float
+        largest y location
+    transform : PyTorch Compose object
+        desired data transformations
+    squeeze : bool
+        whether or not to eliminate the singleton channel dimension 
+    """
+
+    def _load_h5(self):
+        file = h5py.File(config['dataset']['exp_data_directory'] + "/" + config['dataset']['exp_data_file'], 'r', libver='latest')
+
+        # if there is only one sample just load it into RAM and ensure data has a singleton dimension
+        if len(file['data'].shape) == 2:
+            return np.expand_dims(file['data'][:], axis=0), file['labels'][:]
+        else:
+            return file['data'], file['labels']
+
+def get_dataloaders(splits, batch_size, shuffle=True, drop_last=False, transform=None, squeeze=False, num_workers=10, pin_memory=False):
     """
     Construct dictionary of dataloaders for splits ('train', 'val', 'test').
 
@@ -131,7 +166,7 @@ def get_dataloaders(splits, batch_size, shuffle=True, drop_last=False, transform
     datasets = {x : SimData(transform=data_transform[x], squeeze=squeeze) for x in data_transform.keys()}
 
     # prepare dataloaders
-    dataloaders = {x : data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, drop_last=drop_last, shuffle=False if x != 'train' else shuffle), pin_memory=pin_memory, prefetch_factor=5) for x in data_transform.keys()}
+    dataloaders = {x : data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, drop_last=drop_last, shuffle=False if x != 'train' else shuffle), pin_memory=pin_memory) for x in data_transform.keys()}
 
     # return dataloaders
     return dataloaders
@@ -150,7 +185,9 @@ def get_dataloaders_uniform_grid_train(splits, batch_size, grid_dims, transform=
     transform : PyTorch Compose object
         desired data transformations
     squeeze : bool
-        whether or not to eliminate the singleton channel dimension        
+        whether or not to eliminate the singleton channel dimension
+    num_workers : int
+        number of workers for the dataloader        
 
     Returns
     -------
@@ -181,3 +218,33 @@ def get_dataloaders_uniform_grid_train(splits, batch_size, grid_dims, transform=
 
     # return dataloaders
     return dataloaders
+
+def get_exp_data_dataloader(batch_size, transform=None, squeeze=False, num_workers=10):
+    """
+    Construct the dataloader for experimental data. The data is not shuffled.
+
+    Parameters
+    ----------
+    batch_size : int
+        number of elements per batch
+    transform : PyTorch Compose object
+        desired data transformations
+    squeeze : bool
+        whether or not to eliminate the singleton channel dimension
+    num_workers : int
+        number of workers for the dataloader
+
+    Returns
+    -------
+    dataloaders : torch.utils.data.DataLoader
+        dictionary of dataloaders for each split 
+    """
+
+    # prepare transform
+    data_transform = transform['eval'] if transform is not None else transform
+
+    # prepare dataset
+    dataset = ExpData(transform=data_transform, squeeze=squeeze)
+
+    # return dataloader
+    return data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
