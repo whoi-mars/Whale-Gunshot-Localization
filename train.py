@@ -32,7 +32,7 @@ parser.add_argument('--lr', type=float, default=1e-4,
                     help='initial learning rate (default: 1e-4)')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed (default: 1111)')
-parser.add_argument('--channels', type=int, nargs='+', default=[250, 1500, 750] + 5*[368],
+parser.add_argument('--channels', type=int, nargs='+', default=[250, 625] + 3*[368],
                     help='number of TCN blocks including (fusion default: [250] + 7*[500])')
 parser.add_argument('--kernel_size', type=int, default=6,
                     help='size of 1D kernel (default: 6)')
@@ -120,7 +120,9 @@ n_steps_per_epoch = len(dl['train'])
 
 # get label scaling constants for error calculations
 max_x = dl['train'].dataset.max_x
+min_x = dl['train'].dataset.min_x
 max_y = dl['train'].dataset.max_y
+min_y = dl['train'].dataset.min_y
 
 # print size of input
 print(f"spectrogram size: {dl['train'].dataset.size}\n")
@@ -185,6 +187,15 @@ def get_model_state_dict(model):
         return model.module.state_dict()
     else:
         return model.state_dict()
+
+def scale_to_km(x, dim):
+
+    if dim == 'x':
+        return (x*(max_x - min_x) + min_x) / 1000
+    elif dim == 'y':
+        return (x*(max_y - min_y) + min_y) / 1000
+    else:
+        raise ValueError('invalid input')
 
 def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, save_dir=save_dir, save_all_epochs=args.save_all_epochs, start_epoch=args.start_epoch, verbose=args.verbose):
     """
@@ -262,8 +273,10 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                 running_loss += loss.item()*inputs.size(0)
 
                 # get running square error for whole epoch
-                x_mse = F.mse_loss(outputs[:,[0]] * max_x / 1000, x_targets * max_x / 1000, reduction='none')
-                y_mse = F.mse_loss(outputs[:,[1]] * max_y / 1000, y_targets * max_y / 1000, reduction='none')
+                x_mse = F.mse_loss(outputs[:,[0]].detach() * max_x / 1000, x_targets * max_x / 1000, reduction='none')
+                y_mse = F.mse_loss(outputs[:,[1]].detach() * max_y / 1000, y_targets * max_y / 1000, reduction='none')
+                # x_mse = F.mse_loss(scale_to_km(outputs[:,[0]], 'x'), scale_to_km(x_targets, 'x'), reduction='none')
+                # y_mse = F.mse_loss(scale_to_km(outputs[:,[1]], 'y'), scale_to_km(y_targets, 'y'), reduction='none')
                 running_x_sq_error += x_mse.sum()
                 running_y_sq_error += y_mse.sum()
             
