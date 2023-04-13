@@ -1,8 +1,8 @@
+import os
 import argparse
 import copy
 import time
 import math
-import os
 
 from tqdm import tqdm
 import numpy as np
@@ -120,9 +120,9 @@ n_steps_per_epoch = len(dl['train'])
 
 # get label scaling constants for error calculations
 max_x = dl['train'].dataset.max_x
-min_x = dl['train'].dataset.min_x
+# min_x = dl['train'].dataset.min_x
 max_y = dl['train'].dataset.max_y
-min_y = dl['train'].dataset.min_y
+# min_y = dl['train'].dataset.min_y
 
 # print size of input
 print(f"spectrogram size: {dl['train'].dataset.size}\n")
@@ -188,14 +188,14 @@ def get_model_state_dict(model):
     else:
         return model.state_dict()
 
-def scale_to_km(x, dim):
+# def scale_to_km(x, dim):
 
-    if dim == 'x':
-        return (x*(max_x - min_x) + min_x) / 1000
-    elif dim == 'y':
-        return (x*(max_y - min_y) + min_y) / 1000
-    else:
-        raise ValueError('invalid input')
+#     if dim == 'x':
+#         return (x*(max_x - min_x) + min_x) / 1000
+#     elif dim == 'y':
+#         return (x*(max_y - min_y) + min_y) / 1000
+#     else:
+#         raise ValueError('invalid input')
 
 def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, save_dir=save_dir, save_all_epochs=args.save_all_epochs, start_epoch=args.start_epoch, verbose=args.verbose):
     """
