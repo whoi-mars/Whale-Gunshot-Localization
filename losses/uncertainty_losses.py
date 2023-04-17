@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.distributions.normal import Normal
 
 class UncertainLocLoss(nn.Module):
     """
@@ -44,4 +45,31 @@ class UncertainLocLoss(nn.Module):
         expy = torch.exp(-self.log_vars[1])
         return (0.5*expx*x_loss + 0.5*expy*y_loss + 0.5*self.log_vars[0] + 0.5*self.log_vars[1]).mean()
 
- 
+class UncertaintyPredictionLocLoss(nn.Module):
+    """
+    Uncertainty loss based on independent normal distributions. The model should
+    output a predicted mean and standard devaition which are used to parameterize
+    the conditional distributions (per sample).
+    """
+    
+    def __init__(self):
+        super(UncertaintyPredictionLocLoss, self).__init__()
+
+    def forward(self, outputs, x_targets, y_targets):
+        """
+        NLL aggregate loss parameterized by modle.
+        """
+        # extact parameters
+        x_mu = outputs[:,[0]]
+        x_std = torch.exp(outputs[:,[1]])
+        y_mu = outputs[:,[2]]
+        y_std = torch.exp(outputs[:,[3]])
+
+        # instantiate distributions
+        cond_dist_x = Normal(loc=x_mu, scale=x_std)
+        cond_dist_y = Normal(loc=y_mu, scale=y_std)
+
+        # sum NLL for both coordinates
+        loss = -1*cond_dist_x.log_prob(x_targets) - cond_dist_y.log_prob(y_targets)
+
+        return loss.mean()
