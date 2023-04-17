@@ -86,6 +86,92 @@ class Normalize1DChannel:
     def __call__(self, tensor):
         return self.norm(tensor)
 
+class BlockTOSSIT:
+    """
+    Augmentation to zero-out entire TOSSITs randomly. There will always be
+    'min_received' TOSSITs, and combinations of remaining TOSSITs to be zeroed
+    will be applied uniformly.
+
+    ...
+
+    Attributes
+    ----------
+    min_received : int
+        minimum number of unblocked TOSSITs
+    """
+    def __init__(self, min_received):
+        """
+        Construct attributes.
+
+        Parameters
+        ----------
+        min_received : int
+            minimum number of unblocked TOSSITs
+        """
+        self.min_received = min_received
+    
+    def _uniform_ones_bitstring(self, max_ones):
+        """
+        Returns a bit string of length 'max_ones' with uniformly distributed
+        number of ones.
+
+        Parameters
+        ----------
+        max_ones : 
+            length of the bitstring to return
+        
+        Returns
+        -------
+        torch.Tensor : torch.bool
+            bit string
+        """
+        res = torch.zeros((max_ones,), dtype=torch.bool)
+        
+        num_ones = torch.randint(high=max_ones+1, size=())
+        idx = torch.randperm(max_ones)[:num_ones]
+        res[idx] = 1
+
+        return res
+
+    def block(self, x):
+        """
+        Zero out some TOSSITs uniformly while maintaining 'min_received'.
+
+        Parameters
+        ----------
+        x : array-like
+            TOSSIT signals
+
+        Returns
+        -------
+        x : array-like
+            TOSSIT signals with some zeroed out
+        """
+
+        # get total number of TOSSITs and number to decide to keep or not
+        num_TOSSITs = x.shape[0]
+        remainder = num_TOSSITs - self.min_received
+
+        # logical array for final output
+        bidx = torch.zeros((num_TOSSITs,), dtype=torch.bool)
+        
+        # create indexing arrays for min_received and random deletion
+        c_baseline = torch.ones((num_TOSSITs,), dtype=torch.bool)
+        baseline = torch.randperm(num_TOSSITs)[:self.min_received]
+        c_baseline[baseline] = 0
+
+        #execute
+        bidx[baseline] = 0
+        bidx[c_baseline] = self._uniform_ones_bitstring(remainder)
+
+        # apply
+        x[bidx] = 0
+
+        return x
+
+    def __call__(self, tensor):
+        return self.block(tensor)
+
 class FrequencyBandZeroing:
 
     """
@@ -170,15 +256,48 @@ class FrequencyBandZeroing:
     def __call__(self, tensor):
         return self.freq_band_zeroing(tensor)
 
-def get_image_transform():
+def random_wrap(x):
+    """
+    Randomly wrap a time-domain signal 
+    
+    Parameters
+    ----------
+    x : array-like
+        time-domain signal
+    
+    Returns
+    -------
+    array-like
+        randomly wrapped time-domain signal
+    """
+
+    # get max shift possible
+    max_shifts = len(x)
+
+    # shift
+    return np.roll(x, shift=np.random.randint(low=0, high=max_shifts))
+
+def get_image_transform(stats=False):
     """
     Gets dictionary of spectrogram preprocessing transforms for training and evaluation.
+
+    Parameters
+    ----------
+    stats : bool
+        whether or not to load the stats transforms exclusively
 
     Returns
     -------
     dict
         dictionary with training and evaluation preprocessing transforms
     """
+
+    if stats:
+        # transforms for calculating stats
+        transform_stats = transforms.Compose([
+            BlockTOSSIT(3),
+        ])
+        return {'stats' : transform_stats}
 
     # load mean and std
     mu_list = np.load(config['dataset']['data_directory'] + '/mean.npy', allow_pickle=True)
@@ -191,7 +310,39 @@ def get_image_transform():
 
     # training transforms
     transform_train = transforms.Compose([
+        Normalize1DChannel(mu_list, std_list),
+        BlockTOSSIT(3),
+    ])
+
+    return {'train' : transform_train, 'eval' : transform_eval}
+
+def get_image_transform_classify():
+    """
+    Gets dictionary of spectrogram preprocessing transforms for training and evaluation.
+
+    Parameters
+    ----------
+    stats : bool
+        whether or not to load the stats transforms exclusively
+
+    Returns
+    -------
+    dict
+        dictionary with training and evaluation preprocessing transforms
+    """
+
+    # load mean and std
+    mu_list = np.load(config['dataset']['data_directory'] + '/mean_classifier.npy', allow_pickle=True)
+    std_list = np.load(config['dataset']['data_directory'] + '/std_classifier.npy', allow_pickle=True)
+    
+    # evaluation transforms
+    transform_eval = transforms.Compose([
         Normalize1DChannel(mu_list, std_list)
+    ])
+
+    # training transforms
+    transform_train = transforms.Compose([
+        Normalize1DChannel(mu_list, std_list),
     ])
 
     return {'train' : transform_train, 'eval' : transform_eval}
