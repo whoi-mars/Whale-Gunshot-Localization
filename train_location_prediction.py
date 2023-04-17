@@ -13,7 +13,7 @@ import torch.nn.functional as F
 
 from datasets.dataloaders import get_dataloaders
 from utils.transformations import get_image_transform
-from models.fusion_tcn import FusionTCN
+from models.tcn_archs import FusionTCN
 from losses.uncertainty_losses import UncertainLocLoss
 
 # load config file
@@ -114,7 +114,7 @@ dl = get_dataloaders(splits=['train', 'val'],
                     shuffle=True,
                     transform=get_image_transform(),
                     squeeze=True,
-                    num_workers=10,
+                    num_workers=16,
                     pin_memory=True)
 n_steps_per_epoch = len(dl['train'])
 
