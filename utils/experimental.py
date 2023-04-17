@@ -1,6 +1,5 @@
 import os
 import glob
-import pickle
 import warnings
 import copy
 
@@ -39,7 +38,7 @@ def get_matching_files(TOSSIT_dirs, minimum_file_duration=10, closeness_threshol
     # to store results
     matching_files = []
 
-    TOSSIT_paths = [os.path.join(config['dataset']['exp_data_directory'], d) for d in TOSSIT_dirs]
+    TOSSIT_paths = [os.path.join(config['dataset']['ccb_data_directory'], d) for d in TOSSIT_dirs]
 
     # use first TOSSIT in provided list as base for file matching
     base_TOSSIT_path = TOSSIT_paths[0]
@@ -61,6 +60,9 @@ def get_matching_files(TOSSIT_dirs, minimum_file_duration=10, closeness_threshol
         # if file is too short, skip it
         if base_end_DT - base_start_DT < np.timedelta64(minimum_file_duration, 'm'):
             continue
+
+        # flag for if a match can't be found among the other TOSSITs
+        missing_match = False
 
         # find xml file for every other TOSSIT which is closes in time
         for t in TOSSIT_paths[1:]:
@@ -86,23 +88,18 @@ def get_matching_files(TOSSIT_dirs, minimum_file_duration=10, closeness_threshol
             if delta_T[idx] > np.timedelta64(closeness_threshold, 'm'):
                 warnings.warn(f'The closest match is between files {base_xml} and {xml}, but exceeds the closeness threshold of {closeness_threshold} minutes.' \
                             "Ignoring group.")
-                continue
+                
+                # trigger flag
+                missing_match = True
+
+                # stop matching process for this TOSSIT
+                break
 
             # save to group    
             group.append((TOSSIT_xmls[idx].split('log')[0]+"wav", (base_start_DT - DT_list[idx]).astype(float)))
         
         # save group
-        matching_files.append(group)
+        if not missing_match:
+            matching_files.append(group)
 
     return matching_files
-
-if __name__ == "__main__":
-    # if we already have the matching files stored, load them. if not, do the matching.
-    if os.path.exists(os.path.join(config['dataset']['exp_data_directory'], "matching files.p")):
-        with open(os.path.join(config['dataset']['exp_data_directory'], "matching files.p"), "rb") as f:
-            matching_files = pickle.load(f)
-    else:
-        print("Matching corresponding files from each TOSSIT...")
-        matching_files = get_matching_files(TOSSIT_dirs=["6468", "6470", "6471", "6474", "6476"])
-        with open(os.path.join(config['dataset']['exp_data_directory'], "matching files.p"), "wb") as f:
-            pickle.dump(copy.deepcopy(matching_files), f)
