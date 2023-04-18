@@ -332,9 +332,9 @@ def get_image_transform_classify():
     """
 
     # load mean and std
-    mu_list = np.load(config['dataset']['data_directory'] + '/mean_classifier.npy', allow_pickle=True)
-    std_list = np.load(config['dataset']['data_directory'] + '/std_classifier.npy', allow_pickle=True)
-    
+    mu_list = np.load(config['dataset']['data_directory'] + '/mean_classification.npy', allow_pickle=True)
+    std_list = np.load(config['dataset']['data_directory'] + '/std_classification.npy', allow_pickle=True)
+
     # evaluation transforms
     transform_eval = transforms.Compose([
         Normalize1DChannel(mu_list, std_list)
