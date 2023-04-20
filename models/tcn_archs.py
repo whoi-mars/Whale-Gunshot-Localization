@@ -107,6 +107,42 @@ class FusionTemporalConvNet(nn.Module):
         # return list of results from all output brances
         return [self.ends[i](x) for i in range(self.num_outputs)]
 
+class BranchedTemporalConvNet(nn.Module):
+    """
+    TCN with multi-input fusion.
+    """
+
+    def __init__(self, input_channels, num_channels, kernel_size=2, dropout=0.2):
+        super(BranchedTemporalConvNet, self).__init__()
+        
+        # tcn for levels 0 --> num_levels-1
+        layers = []
+        num_levels = len(num_channels)
+        for i in range(num_levels-1):
+            dilation_size = 2 ** i
+            in_channels = input_channels if i == 0 else num_channels[i-1]
+            out_channels = num_channels[i]
+            layers += [TemporalBlock(in_channels, out_channels, kernel_size, stride=1, dilation=dilation_size,
+                                     padding=(kernel_size-1) * dilation_size, dropout=dropout)]
+
+        # network core
+        self.network = nn.Sequential(*layers)
+
+        # separate branches for the last layer before output
+        i = num_levels-1
+        dilation_size = 2 ** i
+        in_channels = num_channels[i-1]
+        out_channels = num_channels[i]
+        self.ends = nn.ModuleList([TemporalBlock(in_channels, out_channels, kernel_size, stride=1, dilation=dilation_size,
+                                     padding=(kernel_size-1) * dilation_size, dropout=dropout) for _ in range(2)])
+
+    def forward(self, x):
+        # run through rest of TCN layers
+        x = self.network(x)
+
+        # return list of results from all output brances
+        return [self.ends[i](x) for i in range(2)]
+
 class TemporalConvNet(nn.Module):
     """
     Standard TCN.
@@ -134,7 +170,7 @@ class TemporalConvNet(nn.Module):
 
 class FusionTCN(nn.Module):
     """
-    TCN with multi-input fusion and a linear output layer.
+    TCN with multi-input fusion and multiple TCN/linear output layers.
     """
 
     def __init__(self, num_inputs, num_outputs, input_size, output_size, num_channels, kernel_size, dropout):
@@ -155,7 +191,7 @@ class FusionTCN(nn.Module):
 
 class TCNClassifier(nn.Module):
     """
-    TCN with linear output layer.
+    TCN with linear output layers.
     """
 
     def __init__(self, input_size, num_channels, kernel_size, dropout):
@@ -166,3 +202,20 @@ class TCNClassifier(nn.Module):
     def forward(self, inputs):
         x = self.tcn(inputs)
         return self.linear(x[:,:,-1])
+
+class TCNRangeAndClassify(nn.Module):
+    """
+    TCN with multiple TCN/linear layers.
+    """
+    
+    def __init__(self, input_size, num_channels, kernel_size, dropout):
+        super(TCNRangeAndClassify, self).__init__()
+        self.tcn = BranchedTemporalConvNet(input_size, num_channels, kernel_size=kernel_size, dropout=dropout)
+        self.linear1 = nn.Linear(num_channels[-1], 1)
+        self.linear2 = nn.Linear(num_channels[-1], 2)
+
+    def forward(self, inputs):
+        x = self.tcn(inputs)
+        x1 = self.linear1(x[0][:,:,-1])
+        x2 = self.linear2(x[1][:,:,-1])
+        return torch.cat((x1, x2), dim=1)
