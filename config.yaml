@@ -1,6 +1,6 @@
 dataset:
   data_directory: "/workspace/data/TOSSIT_sims"
-  entry_keys: [T, data, fs, labels, t_dec_max, t_dec_min, class_labels]
+  entry_keys: [T, data, fs, labels, t_dec_max, t_dec_min, class_labels, range_labels]
   exp_data_directory: "/workspace/data/TOSSIT_experimental_data"
   ccb_data_directory: "/workspace/data/cape_cod_bay/acoustics"
   exp_data_file: "ccb_2020_exp_data.h5"
@@ -21,5 +21,6 @@ scaling:
   min_x: -8775.224099
   max_y: 24555.467997
   min_y: -3984.472166
+  max_r: 32296
 models:
   checkpoints_directories: "/workspace/data/models"
