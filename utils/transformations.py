@@ -320,11 +320,6 @@ def get_image_transform_classify():
     """
     Gets dictionary of spectrogram preprocessing transforms for training and evaluation.
 
-    Parameters
-    ----------
-    stats : bool
-        whether or not to load the stats transforms exclusively
-
     Returns
     -------
     dict
@@ -337,12 +332,40 @@ def get_image_transform_classify():
 
     # evaluation transforms
     transform_eval = transforms.Compose([
-        Normalize1DChannel(mu_list, std_list)
+        Normalize1DChannel(mu_list, std_list),
     ])
 
     # training transforms
     transform_train = transforms.Compose([
         Normalize1DChannel(mu_list, std_list),
+        FrequencyBandZeroing(max_freq_width=30, num_t=0),
+    ])
+
+    return {'train' : transform_train, 'eval' : transform_eval}
+
+def get_image_transform_range_classify():
+    """
+    Gets dictionary of spectrogram preprocessing transforms for training and evaluation.
+
+    Returns
+    -------
+    dict
+        dictionary with training and evaluation preprocessing transforms
+    """
+
+    # load mean and std
+    mu_list = np.load(config['dataset']['data_directory'] + '/mean_range_classification.npy', allow_pickle=True)
+    std_list = np.load(config['dataset']['data_directory'] + '/std_range_classification.npy', allow_pickle=True)
+
+    # evaluation transforms
+    transform_eval = transforms.Compose([
+        Normalize1DChannel(mu_list, std_list),
+    ])
+
+    # training transforms
+    transform_train = transforms.Compose([
+        Normalize1DChannel(mu_list, std_list),
+        FrequencyBandZeroing(max_freq_width=40, num_t=0),
     ])
 
     return {'train' : transform_train, 'eval' : transform_eval}
