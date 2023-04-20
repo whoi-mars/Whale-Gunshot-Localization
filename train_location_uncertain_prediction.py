@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from datasets.dataloaders import get_dataloaders
 from utils.transformations import get_image_transform
 from models.tcn_archs import FusionTCN
-from losses.uncertainty_losses import UncertaintyPredictionLocLoss
+from losses.localization_losses import UncertaintyPredictionLocLoss
 
 # load config file
 with open("config.yaml", 'r') as yaml_file:
