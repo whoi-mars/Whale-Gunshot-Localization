@@ -219,3 +219,20 @@ class TCNRangeAndClassify(nn.Module):
         x1 = self.linear1(x[0][:,:,-1])
         x2 = self.linear2(x[1][:,:,-1])
         return torch.cat((x1, x2), dim=1)
+
+class TCNRangeAndClassifyUncertain(nn.Module):
+    """
+    TCN with multiple TCN/linear layers.
+    """
+    
+    def __init__(self, input_size, num_channels, kernel_size, dropout):
+        super(TCNRangeAndClassifyUncertain, self).__init__()
+        self.tcn = BranchedTemporalConvNet(input_size, num_channels, kernel_size=kernel_size, dropout=dropout)
+        self.linear1 = nn.Linear(num_channels[-1], 2)
+        self.linear2 = nn.Linear(num_channels[-1], 3)
+
+    def forward(self, inputs):
+        x = self.tcn(inputs)
+        x1 = self.linear1(x[0][:,:,-1])
+        x2 = self.linear2(x[1][:,:,-1])
+        return torch.cat((x1, x2), dim=1)
