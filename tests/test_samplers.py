@@ -5,7 +5,7 @@ import unittest
 import yaml
 import numpy as  np
 
-from datasets.samplers import H5BatchSampler, ImbalancedH5BatchSampler, UniformGridH5BatchSampler
+from whale_gunshot_localization.datasets.samplers import H5BatchSampler, ImbalancedH5BatchSampler, UniformGridH5BatchSampler
 
 # load config file
 with open("config.yaml", 'r') as yaml_file:

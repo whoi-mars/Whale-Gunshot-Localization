@@ -2,7 +2,7 @@ import unittest
 
 import torch
 
-from utils.transformations import Normalize1DChannel
+from whale_gunshot_localization.utils.transformations import Normalize1DChannel
 
 class TestNormalize1DChannel(unittest.TestCase):
 
