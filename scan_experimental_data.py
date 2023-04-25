@@ -5,7 +5,7 @@ import copy
 
 import librosa
 
-import utils.experimental as experimental
+import whale_gunshot_localization.utils.experimental as experimental
 
 # load config file
 with open("config.yaml", 'r') as yaml_file:
