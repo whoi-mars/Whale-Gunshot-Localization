@@ -5,6 +5,8 @@
 .ipynb_checkpoints
 __pycache__/
 wandb/
+*.egg-info/
 
 # outputs
 *.out
+train_logs/
