@@ -4,6 +4,7 @@ dataset:
   exp_data_directory: "/workspace/data/TOSSIT_experimental_data"
   ccb_data_directory: "/workspace/data/cape_cod_bay/acoustics"
   exp_data_file: "ccb_2020_exp_data.h5"
+  sandbox_data_file: "sandbox_data.h5"
   noise_data: "ccb_noise_6s.h5"
 TOSSIT:
   TOSSIT_y: [0, -3.521161e+03, -3.521161e+03, 3.521161e+03, 3.521161e+03, ]
