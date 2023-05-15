@@ -6,6 +6,10 @@ import copy
 import yaml
 from bs4 import BeautifulSoup
 import numpy as np
+import torch
+from scipy.signal import find_peaks
+
+from whale_gunshot_localization.utils.transformations import to_spect
 
 # load config file
 from whale_gunshot_localization import config
@@ -102,3 +106,149 @@ def get_matching_files(TOSSIT_dirs, minimum_file_duration=10, closeness_threshol
             matching_files.append(group)
 
     return matching_files
+
+class ClipAnalyzer:
+
+    """
+    Class which applies trained model to experimental data to get detections
+    and range measurements.
+
+    ...
+
+    Attributes
+    ----------
+    model : torch.nn.Module
+        model which performs detection and range estimation
+    mu_list : array-like
+        mean for each spectrogram row across training set
+    std_list : array-like
+        std for each spectrogram row across training set
+    size : int
+        size of the overlapping chunks
+    device : torch.device
+        device to run the model with
+    overlap_fraction : float
+        percentage of sample length to overlap
+    """
+
+    def __init__(self, model, mu_list, std_list, size, device, overlap_fraction=0.75):
+        """
+        Prepare model and constants.
+
+        Parametes
+        ---------
+        model : torch.nn.Module
+            model which performs detection and range estimation
+        mu_list : array-like
+            mean for each spectrogram row across training set
+        std_list : array-like
+            std for each spectrogram row across training set
+        size : int
+            size of the overlapping chunks
+        device : torch.device
+            device to run the model with
+        overlap_fraction : float
+            percentage of sample length to overlap
+        """
+
+        # model and device to use in analysis
+        self.model = model.to(device)
+        self.model.eval()
+        self.device = device
+
+        # mu/std for standardizing data
+        self.mu_list = np.expand_dims(mu_list, axis=-1)
+        self.std_list = np.expand_dims(std_list, axis=-1)
+
+        # size of window for model
+        self.size = size
+
+        # overlap fraction between windows for model analysis
+        self.overlap_fraction = overlap_fraction
+
+    def _collate_samples(self, signal, n=float('inf')):
+        """
+        Collate short snippits from an audio signal with 50% overlap.
+
+        Parameters
+        ----------
+        signal : array-like, (1, N) or (N,)
+            long signal to split into smaller overlapping chunks
+        n : int
+            number of overlapping chunks to sequentially generate from 'signal'
+        """
+
+        assert self.overlap_fraction < 1 and self.overlap_fraction > 0, "overlap_fraction must be in (0,1)."
+
+        if len(signal.shape) == 1:
+            signal = np.expand_dims(signal, axis=0)
+
+        # we want to overlap the signal between samples
+        overlap = int(self.size*(1 - self.overlap_fraction))
+        
+        # get samples which meet the size requirement
+        collated = np.asarray([signal[:,i:i+self.size] for sample, i in enumerate(range(0, signal.shape[1], overlap), start=1) if signal.shape[1] - i >= self.size and sample <= n])
+
+        return collated
+
+    def _preproess_batch(self, examples):
+        """
+        Apply all necessary preprocessing transforms.
+
+        Parameters
+        ----------
+        examples : array-like, (# examples, samples / example)
+            raw collated examples from experimental data
+        
+        Returns
+        -------
+        torch.Tensor, (# examples, # frequency bins, # time bins)
+            preprocessed collabed examples from experimental data
+        """
+
+        # mean-center
+        examples = examples - examples.mean(axis=2, keepdims=True)
+
+        # l2 norm
+        examples = examples / np.sqrt(np.sum(examples ** 2, axis=2, keepdims=True))
+
+        # convert to spectrograms
+        spect_examples = to_spect(examples).squeeze(axis=2)
+
+        # standardize
+        spect_examples = (spect_examples - self.mu_list) / self.std_list
+
+        # return as PyTorch Tensor
+        return torch.from_numpy(spect_examples).float()
+
+    def _filter_model_outputs(self, examples, outputs):
+        """
+        Filter out unique call detections from the analysis of
+        a batch of overlapping snippets of experimental data. 
+        """
+        
+        # get boolean vector of detections
+        detection_vec = torch.argmax(outputs[:,1:], dim=1)
+
+        # get indices of unique detections and filter examples and outputs
+        detection_idx, _ = find_peaks(detection_vec)
+        examples = examples[detection_idx,:]
+        outputs = outputs[detection_idx,:]
+
+        # get detected ranges
+        return examples, outputs[:,0]*config['scaling']['max_r']
+
+    def process_clips(self, clips):
+
+        # get batch of windows
+        collated_batch = self._collate_samples(clips)
+
+        # preprocessing
+        preprocessed_batch = self._preproess_batch(collated_batch).to(self.device)
+
+        # run through model
+        with torch.set_grad_enabled(False):
+            outputs = [self.model(preprocessed_batch[:,i,...]).to('cpu') for i in range(preprocessed_batch.shape[1])]
+
+        # filter unique detections and ranges
+        return [self._filter_model_outputs(preprocessed_batch[:,i,...].to('cpu'), outputs[i]) for i in range(preprocessed_batch.shape[1])]
