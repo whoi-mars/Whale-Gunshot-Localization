@@ -115,7 +115,7 @@ dl = get_dataloaders(splits=['train', 'val'],
                     squeeze=True,
                     num_workers=16,
                     pin_memory=True)
-n_steps_per_epoch = len(dl['train'])
+n_steps_per_epoch = math.ceil(len(dl['train'].dataset) / args.batch_size)
 
 # get label scaling constants for error calculations
 max_x = dl['train'].dataset.max_x

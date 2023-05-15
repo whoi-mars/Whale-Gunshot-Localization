@@ -116,7 +116,7 @@ dl = get_dataloaders_classify(splits=['train', 'val'],
                               squeeze=True,
                               num_workers=10,
                               pin_memory=True)
-n_steps_per_epoch = len(dl['train'])
+n_steps_per_epoch = math.ceil(len(dl['train'].dataset) / args.batch_size)
 
 # print size of input
 print(f"spectrogram size: {dl['train'].dataset.size}\n")

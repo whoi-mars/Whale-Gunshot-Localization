@@ -114,7 +114,7 @@ dl = get_dataloaders_range_classify(splits=['train', 'val'],
                                     squeeze=True,
                                     num_workers=20,
                                     pin_memory=True)
-n_steps_per_epoch = len(dl['train'])
+n_steps_per_epoch = math.ceil(len(dl['train'].dataset) / args.batch_size)
 
 # get label scaling constants for error calculations
 max_r = dl['train'].dataset.max_r
@@ -179,15 +179,6 @@ def get_model_state_dict(model):
         return model.module.state_dict()
     else:
         return model.state_dict()
-
-# def scale_to_km(x, dim):
-
-#     if dim == 'x':
-#         return (x*(max_x - min_x) + min_x) / 1000
-#     elif dim == 'y':
-#         return (x*(max_y - min_y) + min_y) / 1000
-#     else:
-#         raise ValueError('invalid input')
 
 def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, save_dir=save_dir, save_all_epochs=args.save_all_epochs, start_epoch=args.start_epoch, verbose=args.verbose):
     """
