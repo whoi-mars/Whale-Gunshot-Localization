@@ -1,9 +1,7 @@
 import os
 import glob
 import warnings
-import copy
 
-import yaml
 from bs4 import BeautifulSoup
 import numpy as np
 import torch
