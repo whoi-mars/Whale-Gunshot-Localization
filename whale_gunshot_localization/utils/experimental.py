@@ -123,13 +123,17 @@ class ClipAnalyzer:
         std for each spectrogram row across training set
     size : int
         size of the overlapping chunks
+    fs : float
+        sampling frequency
+    T : float
+        signal duration
     device : torch.device
         device to run the model with
     overlap_fraction : float
         percentage of sample length to overlap
     """
 
-    def __init__(self, model, mu_list, std_list, size, device, overlap_fraction=0.75):
+    def __init__(self, model, mu_list, std_list, fs, T, device, overlap_fraction=0.75):
         """
         Prepare model and constants.
 
@@ -141,8 +145,10 @@ class ClipAnalyzer:
             mean for each spectrogram row across training set
         std_list : array-like
             std for each spectrogram row across training set
-        size : int
-            size of the overlapping chunks
+        fs : float
+            sampling frequency
+        T : float
+            signal duration
         device : torch.device
             device to run the model with
         overlap_fraction : float
@@ -159,7 +165,9 @@ class ClipAnalyzer:
         self.std_list = np.expand_dims(std_list, axis=-1)
 
         # size of window for model
-        self.size = size
+        self.fs = fs
+        self.T = T
+        self.size = self.fs * self.T
 
         # overlap fraction between windows for model analysis
         self.overlap_fraction = overlap_fraction
@@ -232,9 +240,10 @@ class ClipAnalyzer:
         detection_idx, _ = find_peaks(detection_vec)
         examples = examples[detection_idx,:]
         outputs = outputs[detection_idx,:]
+        timestamps = detection_idx * (1 - self.overlap_fraction) * self.T
 
         # get detected ranges
-        return examples, outputs[:,0]*config['scaling']['max_r']
+        return examples, (outputs[:,0]*config['scaling']['max_r']).numpy(), timestamps
 
     def process_clips(self, clips):
 
