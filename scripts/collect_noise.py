@@ -1,0 +1,101 @@
+import os
+
+import hdf5storage
+import numpy as np
+import librosa
+from scipy.io import savemat
+from scipy.signal import resample_poly
+from tqdm import tqdm
+
+from whale_gunshot_localization import config, PROJECT_ROOT_DIR
+
+def read_audio_section(wav_path, start_time, end_time, sr):
+    """
+    Read a section of a WAV file.
+
+    Parameters
+    ----------
+    wav_path : str
+        path to WAV file
+    start_time : float
+        start time of section to read
+    end_time : float
+        end time of section to read
+    sr : float
+        sample frequency
+    
+    Returns
+    -------
+    array-like
+        section of audio from WAV file
+    """
+    
+    wav, _ = librosa.load(wav_path, offset=start_time, duration=(end_time - start_time), sr=sr)
+
+    return wav
+
+def collect_noise(n, fs_target, T_target):
+    """
+    Collect noise examples by randomly collecting 6-second examples from the data.
+
+    Parameters
+    ----------
+    n : int
+        number of samples to collect
+    fs_target : float
+        sampling frequency for resampling
+    T_target : float
+        length of signals to sample
+    """
+
+    # get deepest directories in provided in data root which contain the WAV files
+    all_dirs = []
+    max_depth = 0
+    for path, subdirs, _ in os.walk(config['dataset']['data_directory']):
+        for dir in subdirs:
+            
+            curr_path = os.path.join(path, dir)
+            len_path = len(curr_path.split('/'))
+
+            if len_path > max_depth:
+                max_depth = len_path
+
+            all_dirs.append((curr_path, len_path))
+    wav_paths = [pair[0] for pair in all_dirs if pair[1] == max_depth]
+
+    # to store noise signals
+    X = np.zeros((n, fs_target*T_target))
+    
+    files_map = dict()
+    for i in tqdm(range(n)):
+        
+        # look for file with duration longer than T
+        f_duration = 0
+        while f_duration <= T_target:
+            wav_path = str(np.random.choice(wav_paths))
+            if wav_path not in files_map.keys():
+                files_map[wav_path] = [f for f in os.listdir(wav_path) if os.path.isfile(os.path.join(wav_path, f)) and ".wav" in f]
+
+            f_path = os.path.join(wav_path, np.random.choice(files_map[wav_path]))
+
+            f_samplerate = librosa.get_samplerate(f_path)
+            f_duration = librosa.get_duration(filename=f_path, sr=fs_samplerate)
+
+        # get random start time
+        start_t = np.random.randint(0, np.floor(f_duration - T_target))
+        end_t = start_t + T_target
+
+        # read and mean-center signal
+        wav = read_audio_section(f_path, start_t, end_t, f_samplerate)
+        wav = wav - wav.mean()
+        
+        # downsample and save
+        wav = resample_poly(wav, fs_target, f_samplerate)
+        X[i,:] = wav
+
+    # save as MAT file
+    mdict = {u'noise_from_data': X.T, u'fs': float(fs_target)}
+    hdf5storage.savemat(os.path.join(PROJECT_ROOT_DIR, 'noise_collect_ccb_6s.mat'), mdict, format='7.3')
+
+if __name__ == "__main__":
+    collect_noise(n=10000, fs_targe=12000, T=6)
