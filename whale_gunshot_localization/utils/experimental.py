@@ -133,7 +133,7 @@ class ClipAnalyzer:
         percentage of sample length to overlap
     """
 
-    def __init__(self, model, mu_list, std_list, fs, T, device, overlap_fraction=0.75):
+    def __init__(self, model, data_params, device, overlap_fraction=0.75):
         """
         Prepare model and constants.
 
@@ -141,14 +141,16 @@ class ClipAnalyzer:
         ---------
         model : torch.nn.Module
             model which performs detection and range estimation
-        mu_list : array-like
-            mean for each spectrogram row across training set
-        std_list : array-like
-            std for each spectrogram row across training set
-        fs : float
-            sampling frequency
-        T : float
-            signal duration
+        data_params : dict
+            dictionary containing the following key-value pairs:
+            mu_list : array-like
+                mean for each spectrogram row across training set
+            std_list : array-like
+                std for each spectrogram row across training set
+            fs : float
+                sampling frequency
+            T : float
+                signal duration
         device : torch.device
             device to run the model with
         overlap_fraction : float
@@ -161,12 +163,12 @@ class ClipAnalyzer:
         self.device = device
 
         # mu/std for standardizing data
-        self.mu_list = np.expand_dims(mu_list, axis=-1)
-        self.std_list = np.expand_dims(std_list, axis=-1)
+        self.mu_list = np.expand_dims(data_params['mu_list'], axis=-1)
+        self.std_list = np.expand_dims(data_params['std_list'], axis=-1)
 
         # size of window for model
-        self.fs = fs
-        self.T = T
+        self.fs = data_params['fs']
+        self.T = data_params['T']
         self.size = self.fs * self.T
 
         # overlap fraction between windows for model analysis
