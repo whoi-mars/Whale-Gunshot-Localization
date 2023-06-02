@@ -7,6 +7,10 @@ __pycache__/
 wandb/
 *.egg-info/
 
+# images
+*.png
+
 # outputs
 *.out
+*.csv
 train_logs/
