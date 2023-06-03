@@ -5,7 +5,7 @@ import warnings
 from bs4 import BeautifulSoup
 import numpy as np
 import torch
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, peak_widths
 
 from whale_gunshot_localization.utils.transformations import to_spect
 
@@ -238,8 +238,28 @@ class ClipAnalyzer:
         # get boolean vector of detections
         detection_vec = torch.argmax(outputs[:,1:], dim=1)
 
-        # get indices of unique detections and filter examples and outputs
+        # get indices of unique detections. add padding to detect leading peaks
+        detection_vec = np.pad(detection_vec, 1)
         detection_idx, _ = find_peaks(detection_vec)
+        detection_idx = detection_idx - 1
+
+        # ensure detections are separated by T
+        while True:
+
+            # detect repeat detections. add padding for leading detections
+            diff_detection = (np.diff(detection_idx) * (1 - self.overlap_fraction) * self.T) < self.T
+            diff_detection = np.pad(diff_detection, 1)
+            peaks, props = find_peaks(diff_detection, plateau_size=1)
+
+            if len(props['plateau_sizes']) == 0:
+                break
+
+            to_delete = []
+            for w, l, r in zip(props['plateau_sizes'], props['left_edges'], props['right_edges']):
+                to_delete.append(l + 1 if w > 1 else l)
+            detection_idx = np.delete(detection_idx, to_delete)
+        
+        # filter examples and outputs
         examples = examples[detection_idx,:]
         outputs = outputs[detection_idx,:]
         timestamps = detection_idx * (1 - self.overlap_fraction) * self.T
