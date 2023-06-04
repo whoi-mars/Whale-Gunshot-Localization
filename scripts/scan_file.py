@@ -11,7 +11,7 @@ from scipy import signal
 import torch
 
 from whale_gunshot_localization.models.tcn_archs import TCNRangeAndClassify
-from whale_gunshot_localization.utils.experimental import ClipAnalyzer
+from whale_gunshot_localization.utils.experimental import ClipAnalyzer, l2_standardize
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 
 def scan_file(file, data_params, overlap_fraction, chunk_size, model, device):
@@ -52,7 +52,8 @@ def scan_file(file, data_params, overlap_fraction, chunk_size, model, device):
     # clip analyzer
     CA = ClipAnalyzer(model, 
                       data_params,
-                      device, 
+                      preprocessor=l2_standardize,
+                      device=device, 
                       overlap_fraction=overlap_fraction)
 
     # get file duration and sample rate
