@@ -1,0 +1,1 @@
+from whale_gunshot_localization import config
