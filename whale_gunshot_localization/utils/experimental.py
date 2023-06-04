@@ -105,6 +105,44 @@ def get_matching_files(TOSSIT_dirs, minimum_file_duration=10, closeness_threshol
 
     return matching_files
 
+def l2_standardize(examples, mu_list, std_list):
+    """
+    Mean-center, L2 normalizer, convert to spectrogram, and standardize a
+    batch of inputs.
+
+    Parameters
+    ----------
+    examples : array-like, (# examples, samples / example)
+        raw collated examples from experimental data
+    mu_list : array-like
+        mean for each spectrogram row across training set
+    std_list : array-like
+        std for each spectrogram row across training set
+    
+    Returns
+    -------
+    torch.Tensor, (# examples, # frequency bins, # time bins)
+        preprocessed collabed examples from experimental data
+    """
+
+    # mean-center
+    examples = examples - examples.mean(axis=2, keepdims=True)
+
+    # l2 norm
+    examples = examples / np.sqrt(np.sum(examples ** 2, axis=2, keepdims=True))
+
+    # convert to spectrograms
+    spect_examples = to_spect(examples).squeeze(axis=2)
+
+    # standardize
+    spect_examples = (spect_examples - mu_list) / std_list
+
+    # return as PyTorch Tensor
+    return torch.from_numpy(spect_examples).float()
+
+
+
+
 class ClipAnalyzer:
 
     """
@@ -127,13 +165,18 @@ class ClipAnalyzer:
         sampling frequency
     T : float
         signal duration
+    preproessor : function
+        function to preprocess a batch of signals in a way appropriate for the input model.
+        should return a batch of PyTorch Tensors.
     device : torch.device
         device to run the model with
     overlap_fraction : float
         percentage of sample length to overlap
+    sensitivity : int
+        number of adjacent detections to certify an actual detection
     """
 
-    def __init__(self, model, data_params, device, overlap_fraction=0.75):
+    def __init__(self, model, data_params, preprocessor, device='cpu', overlap_fraction=0.75, sensitivity=1):
         """
         Prepare model and constants.
 
@@ -151,16 +194,24 @@ class ClipAnalyzer:
                 sampling frequency
             T : float
                 signal duration
-        device : torch.device
+        preproessor : function
+            function to preprocess a batch of signals in a way appropriate for the input model.
+            should take in 'examples', 'mu_list', and 'std_list' and return a batch of PyTorch Tensors.
+        device : torch.device or str
             device to run the model with
         overlap_fraction : float
             percentage of sample length to overlap
+        sensitivity : int
+            number of adjacent detections to certify an actual detection
         """
 
         # model and device to use in analysis
-        self.model = model.to(device)
-        self.model.eval()
         self.device = device
+        self.model = model.to(self.device)
+        self.model.eval()
+
+        # method to preprocess a batch of data
+        self.preprocessor = preprocessor
 
         # mu/std for standardizing data
         self.mu_list = np.expand_dims(data_params['mu_list'], axis=-1)
@@ -173,6 +224,10 @@ class ClipAnalyzer:
 
         # overlap fraction between windows for model analysis
         self.overlap_fraction = overlap_fraction
+
+        # minimum peak of detection plateau to certify a detection
+        self.sensitivity = sensitivity
+        assert self.sensitivity in (np.arange((1 / (1 - self.overlap_fraction))) + 1), f"with overlap_fraction = {self.overlap_fraction}, sensitivity must be in [1, {int(1 / (1 - self.overlap_fraction))}]"
 
     def _collate_samples(self, signal, n=float('inf')):
         """
@@ -199,36 +254,6 @@ class ClipAnalyzer:
 
         return collated
 
-    def _preproess_batch(self, examples):
-        """
-        Apply all necessary preprocessing transforms.
-
-        Parameters
-        ----------
-        examples : array-like, (# examples, samples / example)
-            raw collated examples from experimental data
-        
-        Returns
-        -------
-        torch.Tensor, (# examples, # frequency bins, # time bins)
-            preprocessed collabed examples from experimental data
-        """
-
-        # mean-center
-        examples = examples - examples.mean(axis=2, keepdims=True)
-
-        # l2 norm
-        examples = examples / np.sqrt(np.sum(examples ** 2, axis=2, keepdims=True))
-
-        # convert to spectrograms
-        spect_examples = to_spect(examples).squeeze(axis=2)
-
-        # standardize
-        spect_examples = (spect_examples - self.mu_list) / self.std_list
-
-        # return as PyTorch Tensor
-        return torch.from_numpy(spect_examples).float()
-
     def _filter_model_outputs(self, examples, outputs):
         """
         Filter out unique call detections from the analysis of
@@ -240,7 +265,7 @@ class ClipAnalyzer:
 
         # get indices of unique detections. add padding to detect leading peaks
         detection_vec = np.pad(detection_vec, 1)
-        detection_idx, _ = find_peaks(detection_vec)
+        detection_idx, _ = find_peaks(detection_vec, plateau_size=self.sensitivity)
         detection_idx = detection_idx - 1
 
         # ensure detections are separated by T
@@ -255,7 +280,7 @@ class ClipAnalyzer:
                 break
 
             to_delete = []
-            for w, l, r in zip(props['plateau_sizes'], props['left_edges'], props['right_edges']):
+            for w, l in zip(props['plateau_sizes'], props['left_edges']):
                 to_delete.append(l + 1 if w > 1 else l)
             detection_idx = np.delete(detection_idx, to_delete)
         
@@ -273,7 +298,7 @@ class ClipAnalyzer:
         collated_batch = self._collate_samples(clips)
 
         # preprocessing
-        preprocessed_batch = self._preproess_batch(collated_batch).to(self.device)
+        preprocessed_batch = self.preprocessor(collated_batch, self.mu_list, self.std_list).to(self.device) # self._preprocess_batch(collated_batch).to(self.device)
 
         # run through model
         with torch.set_grad_enabled(False):
