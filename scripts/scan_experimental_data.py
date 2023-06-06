@@ -25,7 +25,6 @@ anchor_chunk_size = 10 # [min]
 if os.path.exists(os.path.join(config['dataset']['ccb_data_directory'], "matching files.p")):
     print("Found matched TOSSIT files...")
     with open(os.path.join(config['dataset']['ccb_data_directory'], "matching files.p"), "rb") as f:
-        from collections import Counter
         matching_files = pickle.load(f)
 else:
     print("Matching corresponding files from each TOSSIT...")
