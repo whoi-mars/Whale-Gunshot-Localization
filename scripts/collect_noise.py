@@ -1,9 +1,9 @@
 import os
+import argparse
 
 import hdf5storage
 import numpy as np
 import librosa
-from scipy.io import savemat
 from scipy.signal import resample_poly
 from tqdm import tqdm
 
@@ -79,7 +79,7 @@ def collect_noise(n, fs_target, T_target):
             f_path = os.path.join(wav_path, np.random.choice(files_map[wav_path]))
 
             f_samplerate = librosa.get_samplerate(f_path)
-            f_duration = librosa.get_duration(filename=f_path, sr=fs_samplerate)
+            f_duration = librosa.get_duration(filename=f_path, sr=f_samplerate)
 
         # get random start time
         start_t = np.random.randint(0, np.floor(f_duration - T_target))
@@ -98,4 +98,15 @@ def collect_noise(n, fs_target, T_target):
     hdf5storage.savemat(os.path.join(PROJECT_ROOT_DIR, 'noise_collect_ccb_6s.mat'), mdict, format='7.3')
 
 if __name__ == "__main__":
-    collect_noise(n=10000, fs_targe=12000, T=6)
+    
+    # parse input arguments
+    parser = argparse.ArgumentParser(description="Collect examples randomly from experimental data to serve as noise-only examples for training.")
+    parser.add_argument('-n', '--number', type=int, default=10000,
+                        help='number of examples to collect (default: 10000')
+    parser.add_argument('-fs', '--sample_rate', type=float, default=12000,
+                        help='desired sample rate at which to save the collected examples (default: 12000 Hz)')
+    parser.add_argument('-T', '--duration', type=float, default=6,
+                        help='desired signal duration for each collected example (default: 6 s)')
+    args = parser.parse_args()
+
+    collect_noise(n=args.number, fs_target=args.sample_rate, T=args.duration)
