@@ -180,10 +180,10 @@ class Localizer:
         self._tuple_idx = None
         
         # uniformity constant for hypergraph
-        if k > 3:
+        if k > 3 and k <= self.TOSSIT_locations.shape[0]:
             self.k = k
         else:
-            raise ValueError("k must be > 3.")
+            raise ValueError(f"k must be > 3 and < {self.TOSSIT_locations.shape[0]}.")
         
         # thresholds
         self.consistency_thresh = consistency_thresh
@@ -228,13 +228,13 @@ class Localizer:
             l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - x[0]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - x[1]) ** 2)
 
             # return sum squared error between l2s and predicted ranges
-            return np.sum((l2.squeeze() - ranges) ** 2)
+            return (1 / len(ranges))*np.sum((l2.squeeze() - ranges) ** 2)
 
         # random initial guess
         x0 = [self.rng.uniform(self.min_y, self.max_y), self.rng.uniform(self.min_x, self.max_x)]
         
         # optimize!
-        res = minimize(obj, [0, 0], method='Nelder-Mead', options={'disp': False})
+        res = minimize(obj, x0, method='Nelder-Mead', options={'disp': False})
         
         return res.x
 
@@ -253,7 +253,7 @@ class Localizer:
     #             gtsam.PriorFactorPose2(
     #                 beacon_var,
     #                 gtsam.Pose2(*beacon_loc, beacon_theta),
-    #                 gtsam.noiseModel.Isotropic.Sigma(3, 0.0004),
+    #                 gtsam.noiseModel.Isotropic.Sigma(3, 16),
     #             )
     #         )
         
@@ -427,9 +427,7 @@ class Localizer:
                         append = False
                         break
 
-                if not append:
-                    continue
-                else:
+                if append:
                     scenes[edge_set_counter] = range_combo
                     edge_set_counter += 1
         
