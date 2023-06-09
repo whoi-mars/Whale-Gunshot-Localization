@@ -10,10 +10,10 @@ close all
 base_dir = "/media/markgoldwater/Elements/cape_cod_bay/acoustics/";
 
 % location of source wav file where a signal of interest was identified
-source_file = fullfile(base_dir, "6470/6470.220407001558.wav");
+source_file = fullfile(base_dir, "6471/6471.220407121505.wav");
 
 % timestamp in the source file
-timestamp = 37995; % [sec]
+timestamp = 7492.5; % [sec]
 
 % control how much to the left and right of timestamp is saved
 window_delta = 80; % [sec]
@@ -180,19 +180,32 @@ end
 sgt = sgtitle("Fine Synchronize");
 sgt.FontSize = 30;
 
-%%
+%% SAVE ROW FOR EXAMPLE CSV
 
 % get empty row to fill for csv and save TOSSIT order
-row = cell(1,3*(length(TOSSIT_id_list)+1));
+row_examples = cell(1,3*(length(TOSSIT_id_list)+1));
 TOSSIT_order = [TOSSIT_id_source TOSSIT_id_list];
+
+create row to copy/paste into csv
+row_idx = 1;
+for i = 1:length(wav_paths)
+    row_examples{row_idx} = wav_paths{i};
+    row_examples{row_idx+1} = timestamp + course_offset(i) - fine_offset(i) - window_delta;
+    row_examples{row_idx+2} = 0;
+    row_idx = row_idx + 3;
+end
+
+%% SAVE ROW FOR WINDOW CSV
+
+% get empty row to fill for csv and save TOSSIT order
+row_window = cell(1,2*(length(TOSSIT_id_list)+1));
 
 % create row to copy/paste into csv
 row_idx = 1;
 for i = 1:length(wav_paths)
-    row{row_idx} = wav_paths{i};
-    row{row_idx+1} = timestamp + course_offset(i) - fine_offset(i) - window_delta;
-    row{row_idx+2} = 0;
-    row_idx = row_idx + 3;
+    row_window{row_idx} = wav_paths{i};
+    row_window{row_idx+1} = timestamp + course_offset(i) - window_delta;
+    row_idx = row_idx + 2;
 end
 
 %% FUNCTIONS
