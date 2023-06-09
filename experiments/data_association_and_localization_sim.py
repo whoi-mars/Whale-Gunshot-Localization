@@ -226,7 +226,9 @@ if __name__ == "__main__":
     # parse input arguments
     parser = argparse.ArgumentParser(description="Run Monte Carlo simulations for data association/localization algorithm")
     parser.add_argument('--simulate', action='store_true',
-                        help="simulate rather than use previous results if available")
+                        help="simulate rather than use previous results if available (default: false)")
+    parser.add_argument('--save_figs', action='store_true',
+                        help="save figures (default: false)")
     args = parser.parse_args()
 
     # path for results CSV
@@ -241,12 +243,12 @@ if __name__ == "__main__":
         rng = np.random.default_rng(1524)
 
         # parameters for localizer and data_generator
-        localizer_params = dict(k=5, consistency_thresh=1500, method_thresh=0.95, prune=False, rng=rng)
-        data_gen_params = dict(var=0, num_delete=0, rng=rng)
+        localizer_params = dict(k=4, consistency_thresh=2000, method_thresh=0.95, prune=False, rng=rng)
+        data_gen_params = dict(var=1000, num_delete=1, rng=rng)
 
         # run data association/localization experiment
         df = monte_carlo_sim(n=150, 
-                             num_sources_list=range(1, 3), 
+                             num_sources_list=range(1, 2), 
                              localizer_params=localizer_params, 
                              data_gen_params=data_gen_params,)
         df.to_csv(path, index=False)
@@ -363,6 +365,16 @@ if __name__ == "__main__":
         plt.ylabel("Estimated Source Run Fraction")
 
     plt.show()
+
+    if args.save_figs:
+        fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments")
+        fig1.savefig(os.path.join(fig_path, 'loc_error.png'))
+        fig2.savefig(os.path.join(fig_path, 'data_assoc_error.png'))
+        fig3.savefig(os.path.join(fig_path, 'missed_measurements.png'))
+        fig4.savefig(os.path.join(fig_path, 'total_fails.png'))
+        fig5.savefig(os.path.join(fig_path, 'missed_associations.png'))
+        fig6.savefig(os.path.join(fig_path, 'false_associations.png'))
+        fig7.savefig(os.path.join(fig_path, 'percent_det.png'))
 
 
 

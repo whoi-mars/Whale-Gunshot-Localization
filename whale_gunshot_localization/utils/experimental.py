@@ -175,9 +175,12 @@ class Localizer:
         
         # initialize empty measurements and hypergraph
         self.measurements = None
+        self.formatted_linear_idx = None
         self.H = None
         self._linear_measurements = None
         self._tuple_idx = None
+        self._sensors = None
+        self._ranges = None
         
         # uniformity constant for hypergraph
         if k > 3 and k <= self.TOSSIT_locations.shape[0]:
@@ -200,43 +203,66 @@ class Localizer:
 
         # rng
         self.rng = rng if rng is not None else np.random
+
+        self._make_LUT()
     
-    def _localize(self, ranges, sensors_idx):
-        """
-        An iterative localization method based on minimizing the following cost function:
+    def _make_LUT(self):
         
-        (1 / N) * \sum_{i=1}^{N} (||p_{i} - p_{0}||_{2} - r_{i})^{2}.
+        # precalculate TOSSIT distances for all possible gridded locations
+        num_TOSSITs = self.TOSSIT_locations.shape[0]
+        x = np.arange(self.min_x-10000, self.max_x+10000, 50)
+        y = np.arange(self.min_y-10000, self.max_y+10000, 50)
+        self.X, self.Y = np.meshgrid(x, y)
+        self.LUT = np.zeros((num_TOSSITs, *self.X.shape))
+        for t in range(num_TOSSITs):
+            self.LUT[t,...] = np.sqrt(((self.TOSSIT_locations[t,0] - self.Y) ** 2) + ((self.TOSSIT_locations[t,1] - self.X) ** 2))
+    
+    def _localize(self, ranges, sensors_idx, cost=False):
+
+        ranges = ranges[:,np.newaxis,np.newaxis]
+        sq_err = ((self.LUT[sensors_idx,:] - ranges) ** 2).sum(axis=0)
+
+        if cost:
+            return np.min(sq_err), np.asarray([self.Y[sq_err == np.min(sq_err)], self.X[sq_err == np.min(sq_err)]]).squeeze()
+        else:
+            return np.asarray([self.Y[sq_err == np.min(sq_err)], self.X[sq_err == np.min(sq_err)]]).squeeze()
+
+    # def _localize(self, ranges, sensors_idx):
+    #     """
+    #     An iterative localization method based on minimizing the following cost function:
         
-        Parameters
-        ----------
-        ranges : array-like of shape M,
-            list of range measurements from source to sensor
-        sensors_idx : array-like of shape M,
-            list of sensor indices associated with the provided range measurements
+    #     (1 / N) * \sum_{i=1}^{N} (||p_{i} - p_{0}||_{2} - r_{i})^{2}.
+        
+    #     Parameters
+    #     ----------
+    #     ranges : array-like of shape M,
+    #         list of range measurements from source to sensor
+    #     sensors_idx : array-like of shape M,
+    #         list of sensor indices associated with the provided range measurements
             
-        Returns
-        -------
-        res.fun : float
-            cost function value
-        res.x : array-like
-            optimized location
-        """
+    #     Returns
+    #     -------
+    #     res.fun : float
+    #         cost function value
+    #     res.x : array-like
+    #         optimized location
+    #     """
         
-        # define objective function
-        def obj(x):
-            # calculate l2s between TOSSIT positions and predicted location
-            l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - x[0]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - x[1]) ** 2)
+    #     # define objective function
+    #     def obj(x):
+    #         # calculate l2s between TOSSIT positions and predicted location
+    #         l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - x[0]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - x[1]) ** 2)
 
-            # return sum squared error between l2s and predicted ranges
-            return (1 / len(ranges))*np.sum((l2.squeeze() - ranges) ** 2)
+    #         # return sum squared error between l2s and predicted ranges
+    #         return (1 / len(ranges))*np.sum((l2.squeeze() - ranges) ** 2)
 
-        # random initial guess
-        x0 = [self.rng.uniform(self.min_y, self.max_y), self.rng.uniform(self.min_x, self.max_x)]
+    #     # random initial guess
+    #     x0 = [self.rng.uniform(self.min_y, self.max_y), self.rng.uniform(self.min_x, self.max_x)]
         
-        # optimize!
-        res = minimize(obj, x0, method='Nelder-Mead', options={'disp': False})
+    #     # optimize!
+    #     res = minimize(obj, x0, method='Nelder-Mead', options={'disp': False})
         
-        return res.x
+    #     return res.x
 
     # def _localize(self, ranges, sensors_idx):
         
@@ -360,11 +386,13 @@ class Localizer:
         # list of all measurements traversed sensor-major
         self._linear_measurements = []
         # same shape as measurements but with linear indices
-        formatted_linear_idx = [[] for _ in range(self.TOSSIT_locations.shape[0])]
+        self.formatted_linear_idx = [[] for _ in range(self.TOSSIT_locations.shape[0])]
         # measurement to linear index dict
         measurement_to_linear_idx = {}
-        # (mesaurement, sensor_id) elements
+        # (sensor_id, measurement_id) elements
         self._tuple_idx = []
+        self._sensors = []
+        self._ranges = []
         for i, m_list in enumerate(self.measurements):
             for j, m in enumerate(m_list):
 
@@ -373,17 +401,21 @@ class Localizer:
 
                 # keep track of linear index
                 linear_idx = len(self._linear_measurements)
-                formatted_linear_idx[i].append(linear_idx)
+                self.formatted_linear_idx[i].append(linear_idx)
                 measurement_to_linear_idx[m] = linear_idx
 
                 # keep linear list of measurements
                 self._linear_measurements.append(m)
 
                 self._tuple_idx.append((i, j))
+                self._sensors.append(i)
+                self._ranges.append(m)
 
         # convert linear_measurements to numpy array
         self._linear_measurements = np.asarray(self._linear_measurements)
         self._tuple_idx = np.asarray(self._tuple_idx)
+        self._sensors = np.asarray(self._sensors)
+        self._ranges = np.asarray(self._ranges)
 
         ######################################################
         #                  build hypergraph                  #
@@ -399,7 +431,7 @@ class Localizer:
         for s_comb in sensor_combs:
 
             # get range measurment indices associated with specified sensors in s_comb
-            ranges = [formatted_linear_idx[sensor_idx] for sensor_idx in s_comb]
+            ranges = [self.formatted_linear_idx[sensor_idx] for sensor_idx in s_comb]
 
             # get all combinations of measurement indices across the sensors as List[List]
             range_combos = map(list, itertools.product(*ranges))
@@ -439,9 +471,51 @@ class Localizer:
     
     def reset(self):
         self.measurements = None
+        self.formatted_linear_idx = None
         self.H = None
         self._linear_measurements = None
-        self.tuple_idx = None
+        self._tuple_idx = None
+        self._sensors = None
+        self._ranges = None
+
+    def _last_step(self, associations):
+        
+        assert self.measurements, "measurements have not been set"
+
+        for a_idx in range(len(associations)):
+            for m in self.formatted_linear_idx:
+                
+                # set of measurements which must be disjoint
+                mask = set(m)
+
+                # intersect mask with associations to find
+                # where more than one member is present
+                intersection = mask.intersection(associations[a_idx])
+
+                # figure out which member of intersection
+                # is the best fit based on localization
+                if len(intersection) > 1:
+                    max_err = float('inf')
+                    best_assoc = None
+                    for i in itertools.combinations(intersection, len(intersection) - 1):
+
+                        # take away all but one measurement from the sensor measurements
+                        popped_a = associations[a_idx] - set(i)
+
+                        # get sensor indices and ranges
+                        sensors = self._sensors[list(popped_a)]
+                        ranges = self._ranges[list(popped_a)]
+                        
+                        # calculate localization cost and update best
+                        cost, _ = self._localize(ranges, sensors, cost=True)
+                        if cost < max_err:
+                            max_err = cost
+                            best_assoc = popped_a
+                    
+                    # update association
+                    associations[a_idx] = best_assoc
+
+        return [assoc for assoc in associations if len(assoc) >= 3]
 
     def associate_and_localize(self, method='clique'):
         """
@@ -474,10 +548,10 @@ class Localizer:
         elif method == 'partition':
             HG = hmod.precompute_attributes(self.H)
             associations = hmod.kumar(HG)
-            # associations = graph_tools.last_step(HG, A, wdc=hmod.linear)
+            # associations = self._last_step(associations)
         else:
             raise ValueError("Method must be either 'clique' or 'partition'")
-        
+
         locs = []
         for a in associations:
             a = list(a)
@@ -485,7 +559,6 @@ class Localizer:
             ranges = self._linear_measurements[a]
             loc = self._localize(ranges, sensors)
             locs.append(loc)
-        
         locs = np.asarray(locs)
         
         return associations, locs
