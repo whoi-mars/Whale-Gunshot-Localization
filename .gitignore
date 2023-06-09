@@ -16,5 +16,5 @@ wandb/
 # outputs
 *.out
 *.csv
-!/matlab/*.csv
+!matlab/*.csv
 train_logs/
