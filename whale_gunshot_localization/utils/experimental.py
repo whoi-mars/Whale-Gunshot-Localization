@@ -359,7 +359,7 @@ class Localizer:
                 return loc
             return (q + c).squeeze() 
         
-    def set_measurements(self, measurements):
+    def set_measurements(self, measurements, adaptive=False, adaptive_max=5000, threshold_delta=500):
         """
         Create a hypergraph which represents groups of k-consistent measurements.
         
@@ -421,53 +421,60 @@ class Localizer:
         #                  build hypergraph                  #
         ######################################################
 
-        # get all combinations of sensor indices
-        sensor_combs = itertools.combinations(non_empty_sensors, self.k)
+        adaptive_thresh = self.consistency_thresh
+        while True:
+            # get all combinations of sensor indices
+            sensor_combs = itertools.combinations(non_empty_sensors, self.k)
 
-        # for each group of k sensors, get valid measurement combination
-        # candidates based on trilateration errors
-        scenes = {}
-        edge_set_counter = 0
-        for s_comb in sensor_combs:
+            # for each group of k sensors, get valid measurement combination
+            # candidates based on trilateration errors
+            scenes = {}
+            edge_set_counter = 0
+            for s_comb in sensor_combs:
 
-            # get range measurment indices associated with specified sensors in s_comb
-            ranges = [self.formatted_linear_idx[sensor_idx] for sensor_idx in s_comb]
+                # get range measurment indices associated with specified sensors in s_comb
+                ranges = [self.formatted_linear_idx[sensor_idx] for sensor_idx in s_comb]
 
-            # get all combinations of measurement indices across the sensors as List[List]
-            range_combos = map(list, itertools.product(*ranges))
+                # get all combinations of measurement indices across the sensors as List[List]
+                range_combos = map(list, itertools.product(*ranges))
 
-            # determine which candidates are consistent
-            for range_combo in range_combos:
+                # determine which candidates are consistent
+                for range_combo in range_combos:
 
-                range_subcombos = list(map(list,itertools.combinations(range_combo, self.k-1)))
-                s_subcombos = list(map(list, itertools.combinations(s_comb, self.k-1)))
+                    range_subcombos = list(map(list,itertools.combinations(range_combo, self.k-1)))
+                    s_subcombos = list(map(list, itertools.combinations(s_comb, self.k-1)))
 
-                append = True
-                for range_subcombo, s_subcombo in zip(range_subcombos, s_subcombos):
+                    append = True
+                    for range_subcombo, s_subcombo in zip(range_subcombos, s_subcombos):
 
-                    # prune groups of k measurements based if any of the pairs don't intersect
-                    if self.prune and (not math_tools.check_intersection(self.TOSSIT_locations[s_subcombo,:], self._linear_measurements[range_subcombo])):
-                        append = False
-                        break
+                        # prune groups of k measurements based if any of the pairs don't intersect
+                        if self.prune and (not math_tools.check_intersection(self.TOSSIT_locations[s_subcombo,:], self._linear_measurements[range_subcombo])):
+                            append = False
+                            break
 
-                    # get trilateration cost for candidate
-                    loc = self._hybrid_localize(self._linear_measurements[range_subcombo], s_subcombo)
+                        # get trilateration cost for candidate
+                        loc = self._hybrid_localize(self._linear_measurements[range_subcombo], s_subcombo)
 
-                    r = (set(range_combo) - set(range_subcombo)).pop()
-                    s = (set(s_comb) - set(s_subcombo)).pop()
-                    if math_tools.point_circle_shortest_distance(self.TOSSIT_locations[s,:], self._linear_measurements[r], loc) > self.consistency_thresh:
-                        append = False
-                        break
+                        r = (set(range_combo) - set(range_subcombo)).pop()
+                        s = (set(s_comb) - set(s_subcombo)).pop()
+                        if math_tools.point_circle_shortest_distance(self.TOSSIT_locations[s,:], self._linear_measurements[r], loc) > adaptive_thresh:
+                            append = False
+                            break
 
-                if append:
-                    scenes[edge_set_counter] = range_combo
-                    edge_set_counter += 1
-        
-        # save hypergraph
-        if len(scenes):
-            self.H = hnx.Hypergraph(scenes)
-            return True
-        return False
+                    if append:
+                        scenes[edge_set_counter] = range_combo
+                        edge_set_counter += 1
+            
+            # save hypergraph
+            if len(scenes):
+                self.H = hnx.Hypergraph(scenes)
+                return True
+            elif adaptive and (not len(scenes)) and adaptive_thresh < adaptive_max:
+                adaptive_thresh += threshold_delta
+                continue
+            else:
+                return False
+
     
     def reset(self):
         self.measurements = None
@@ -548,7 +555,7 @@ class Localizer:
         elif method == 'partition':
             HG = hmod.precompute_attributes(self.H)
             associations = hmod.kumar(HG)
-            # associations = self._last_step(associations)
+            associations = self._last_step(associations)
         else:
             raise ValueError("Method must be either 'clique' or 'partition'")
 
