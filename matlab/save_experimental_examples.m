@@ -118,7 +118,7 @@ for j = 1:num_rows
     for i = 1:num_TOSSITs
         i = reidx(i);
         start_sample = round((T(j,"Start" + string(i)).(1) + T(j,"CallStart" + string(i)).(1))*fs); 
-        [y, fs_file] = audioread(T(row, "File" + string(i)).(1){1}, [start_sample, start_sample + example_length*fs - 1]);
+        [y, fs_file] = audioread(T(j, "File" + string(i)).(1){1}, [start_sample, start_sample + example_length*fs - 1]);
         y = resample(y, fs_desired, fs);
         y = (y - mean(y)).';
         
@@ -126,7 +126,7 @@ for j = 1:num_rows
             y = y ./ sqrt(sum(y.^2));
         end
         
-        signals(:,i,num_rows) = y;
+        signals(:,i,j) = y;
     end
     
     % save labels from csv
