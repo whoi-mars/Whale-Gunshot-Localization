@@ -25,7 +25,7 @@ fs = 24000; % [Hz]
 fs_desired = 600; % [Hz]
 
 % row number
-row = 3;
+row = 1;
 
 % simulated order of TOSSITs
 sim_order = ["6474", "6470", "6471", "6476", "6468"];
@@ -77,19 +77,20 @@ end
 
 %% SAVE
 % create matrix for saved signals
-signals = zeros(fs_desired*example_length, num_TOSSITs, num_rows, 'single');
+signals = zeros(fs_desired*example_length, num_TOSSITs, num_rows,'single');
 
 % collect signals to save, reindexing so that the TOSSITs are in the same
 % order which was used for simulation
 for j = 1:num_rows
     for i = 1:num_TOSSITs
         i = reidx(i);
-        start_sample = round((T(j,"Start" + string(i)).(1))*fs); 
-        [y, fs_file] = audioread(T(row, "File" + string(i)).(1){1}, [start_sample, start_sample + example_length*fs - 1]);
+        start_sample = round((T(j,"Start" + string(i)).(1))*fs);
+        [y, fs_file] = audioread(T(j, "File" + string(i)).(1){1}, [start_sample, start_sample + example_length*fs - 1]);
+        size(y)
         y = resample(y, fs_desired, fs);
-        y = (y - mean(y)).';
-        
-        signals(:,i,num_rows) = y;
+        size(y)
+        y = y - mean(y);
+        signals(:,i,j) = y;
     end
 end
 
