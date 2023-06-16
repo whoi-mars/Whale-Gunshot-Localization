@@ -45,9 +45,14 @@ def scan_file(file, data_params, overlap_fraction, chunk_size, model, device):
 
     assert set(data_params.keys()) == set(['mu_list', 'std_list', 'fs', 'T']), 'check items in data_params dictionary.'
 
+    # results path and sensor
+    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "scan_results.csv")
+    results_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results")
+    sensor = file.split('/')[-2]
+
     # make results CSV file if it doesn't exist
-    if not os.path.exists(os.path.join(PROJECT_ROOT_DIR, 'scan_results.csv')):
-        pd.DataFrame(columns=["file_name", "timestamp"]).to_csv(os.path.join(PROJECT_ROOT_DIR, 'scan_results.csv'), index=False)
+    if not os.path.exists(csv_path):
+        pd.DataFrame(columns=["sensor", "file_name", "timestamp"]).to_csv(csv_path, index=False)
 
     # clip analyzer
     CA = ClipAnalyzer(model, 
@@ -59,10 +64,14 @@ def scan_file(file, data_params, overlap_fraction, chunk_size, model, device):
     # get file duration and sample rate
     file_duration = librosa.get_duration(filename=file)
     file_samplerate = librosa.get_samplerate(path=file)
+    
+    # return if nothing to scan
+    if file_duration < data_params['T']:
+        return
 
     pointer = 0
-    c = 0
-    with tqdm(total=file_duration // chunk_size) as pbar:
+    # c = 0
+    with tqdm(total=file_duration // (chunk_size - (overlap_fraction * data_params['T']))) as pbar:
         while file_duration - pointer > chunk_size:
 
             # get CHUNK of data and downsample
@@ -73,13 +82,13 @@ def scan_file(file, data_params, overlap_fraction, chunk_size, model, device):
             imgs, range_measurements, timestamps = CA.process_clips(y)[0]
 
             if len(timestamps):
-                new_row = pd.DataFrame({'file_name' : [file for _ in timestamps], 'timestamp' : [pointer + t for t in timestamps]})
-                new_row.to_csv('scan_results.csv', mode='a', index=False, header=False)
+                new_row = pd.DataFrame({'sensor' : [sensor for _ in timestamps], 'file_name' : [file for _ in timestamps], 'timestamp' : [pointer + t for t in timestamps]})
+                new_row.to_csv(csv_path, mode='a', index=False, header=False)
                 
-                for i in imgs:
-                    plt.imshow(i)
-                    plt.savefig(f'{c}.png')
-                    c += 1
+                # for i in imgs:
+                #     plt.imshow(i)
+                #     plt.savefig(os.path.join(results_path, f'{c}.png'))
+                #     c += 1
 
             pointer += (chunk_size - (overlap_fraction * data_params['T']))
             pbar.update(1)
