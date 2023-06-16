@@ -6,6 +6,9 @@ import torch
 from bs4 import BeautifulSoup
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.dates.DateFormatter('%Y-%m-%d %H')
 
 from whale_gunshot_localization.models.tcn_archs import TCNRangeAndClassify
 from whale_gunshot_localization.utils.experimental import ClipAnalyzer, l2_standardize
@@ -15,17 +18,20 @@ from scan_file import scan_file
 parser = argparse.ArgumentParser(description="Scan all files in sensor.")
 parser.add_argument('--scan', action='store_true',
                     help='whether to scan before plotting')
-parser.add_argument('--sensor', '-s', type=int,
+parser.add_argument('--sensor', '-s', type=int, required=True,
                     help='which sensor to scan')
 parser.add_argument('-o', '--overlap_fraction', type=float, default=0.75, metavar="[float in (0, 1)]", required=False,
                     help='how much window to overlap when scanning the file (default: 0.75)')
 parser.add_argument('-c', '--chunk_size', type=float, default=160, required=False,
                     help='chunk of WAV file to process simultaneously with the TCN in seconds (default: 160)')
+parser.add_argument('--background', '-b', action='store_true',
+                    help='silence the progress bar')
 args = parser.parse_args()
 
 def sort_wav_chronological(wav_files, xml_files):
 
     start_times = []
+    end_times = []
 
     for wf in wav_files:
 
@@ -37,14 +43,17 @@ def sort_wav_chronological(wav_files, xml_files):
             data = f.read()
         data = BeautifulSoup(data, features='lxml')
         start_time = np.datetime64(data.find_all("wavfilehandler", samplingstarttimelocal=True)[0]['samplingstarttimelocal'])
+        end_time = np.datetime64(data.find_all("wavfilehandler", samplingstoptimelocal=True)[0]['samplingstoptimelocal'])
         start_times.append(start_time)
+        end_times.append(end_time)
 
     # get sorted indices
     idx_sorted = np.argsort(start_times)
 
     start_times = np.asarray(start_times)
+    end_times = np.asarray(end_times)
     
-    return wav_files[idx_sorted], start_times[idx_sorted]
+    return wav_files[idx_sorted], start_times[idx_sorted], end_times[idx_sorted]
 
 
 if __name__ == "__main__":
@@ -70,7 +79,7 @@ if __name__ == "__main__":
         xml_files = np.asarray(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], str(args.sensor), "*.xml")))
 
         # sort wav files chronologically
-        wav_files, start_times = sort_wav_chronological(wav_files, xml_files)
+        wav_files, start_times, end_times = sort_wav_chronological(wav_files, xml_files)
 
         data_params = {'mu_list' : np.load(config['dataset']['data_directory'] + '/mean_range_classification.npy', allow_pickle=True),
                     'std_list' : np.load(config['dataset']['data_directory'] + '/std_range_classification.npy', allow_pickle=True),
@@ -78,12 +87,21 @@ if __name__ == "__main__":
                     'T' : config['signal']['T'],}
 
         # scan file
-        scan_file(file=wav_files[1],
-                    data_params=data_params,
-                    overlap_fraction=args.overlap_fraction, 
-                    chunk_size=args.chunk_size, 
-                    model=model,
-                    device=device)
+        total = len(wav_files)
+        for i, wav_file in enumerate(wav_files):
+
+            # if running as a background process just print progress
+            if args.background:
+                print(f'{i}/{total}', flush=True)
+            
+            scan_file(file=wav_file,
+                        data_params=data_params,
+                        overlap_fraction=args.overlap_fraction, 
+                        chunk_size=args.chunk_size, 
+                        model=model,
+                        device=device,
+                        background=args.background)
+            print()
     
     # results path
     path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "scan_results.csv")
@@ -103,18 +121,34 @@ if __name__ == "__main__":
         xml_files.extend(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], str(sensor), "*.xml")))
     wav_files = np.asarray(wav_files)
     xml_files = np.asarray(xml_files)
-    wav_files, start_times = sort_wav_chronological(wav_files, xml_files)
-    time_dict = dict(zip(wav_files, start_times))
+    wav_files, start_times, end_times = sort_wav_chronological(wav_files, xml_files)
+    start_time_dict = dict(zip(wav_files, start_times))
+    end_time_dict = dict(zip(wav_files, end_times))
 
-    # add column with timestamp relative to global time
-    df["global_timestamp"] = df.apply(lambda row : time_dict[row['file_name']] + np.timedelta64(int(row['timestamp'] * 1000), 'ms'), axis=1)
-    
-    bins_dt = pd.date_range(start=df["global_timestamp"].min(), end=df["global_timestamp"].max(), freq="2min")
-    bins_str = bins_dt.astype(str).values
+    seen_files = []
+    for f in df['file_name']:
+        
+        # skip if we've seen file already
+        if f in seen_files:
+            continue
+        
+        # filter by chosen sensor and current file
+        df_file = df[(df['sensor'] == args.sensor) & (df['file_name'] == f)].copy()
 
-    labels = ['({}, {}]'.format(bins_str[i-1], bins_str[i]) for i in range(1, len(bins_str))]
+        # add column with timestamp relative to global time
+        df_file['global_timestamp'] = df_file.apply(lambda row : start_time_dict[row['file_name']] + np.timedelta64(int(row['timestamp'] * 1000), 'ms'), axis=1)
+        
+        # get bin edges
+        bins_dt = pd.date_range(start=start_time_dict[f], end=end_time_dict[f], freq="2min")
+        
+        # bin labels are left edge
+        bins_str = bins_dt.astype(str).values
+        labels = [bins_dt[i-1] for i in range(1, len(bins_str))]
+        
+        hist_vals = pd.to_datetime(pd.cut(df_file["global_timestamp"], bins=bins_dt, labels=labels).dropna())
+        plt.hist(hist_vals, bins=bins_dt)
+        plt.grid()
+        plt.savefig('test.png')
 
-    # df['cat'] = pd.cut(df['Date'], bins=bins_dt, labels=labels)
-    
-    df['bin'] = pd.cut(df["global_timestamp"], bins=bins_dt, labels=labels)
-    print(df['bin'])
+        seen_files.append(f)
+        break
