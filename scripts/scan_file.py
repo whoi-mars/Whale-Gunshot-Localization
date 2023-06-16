@@ -14,7 +14,7 @@ from whale_gunshot_localization.models.tcn_archs import TCNRangeAndClassify
 from whale_gunshot_localization.utils.experimental import ClipAnalyzer, l2_standardize
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 
-def scan_file(file, data_params, overlap_fraction, chunk_size, model, device):
+def scan_file(file, data_params, overlap_fraction, chunk_size, model, device, background=False):
 
     """
     Scan single file for gunshots using a trained TCN.
@@ -41,6 +41,8 @@ def scan_file(file, data_params, overlap_fraction, chunk_size, model, device):
         Pytorch model
     device : torch.device
         device to run the model on
+    background : bool
+        silence the progress bar
     """
 
     assert set(data_params.keys()) == set(['mu_list', 'std_list', 'fs', 'T']), 'check items in data_params dictionary.'
@@ -71,7 +73,7 @@ def scan_file(file, data_params, overlap_fraction, chunk_size, model, device):
 
     pointer = 0
     # c = 0
-    with tqdm(total=file_duration // (chunk_size - (overlap_fraction * data_params['T']))) as pbar:
+    with tqdm(total=file_duration // (chunk_size - (overlap_fraction * data_params['T'])), disable=background) as pbar:
         while file_duration - pointer > chunk_size:
 
             # get CHUNK of data and downsample
