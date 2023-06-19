@@ -7,8 +7,7 @@ from bs4 import BeautifulSoup
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.dates.DateFormatter('%Y-%m-%d %H')
+import matplotlib.dates as mdates
 
 from whale_gunshot_localization.models.tcn_archs import TCNRangeAndClassify
 from whale_gunshot_localization.utils.experimental import ClipAnalyzer, l2_standardize
@@ -92,7 +91,7 @@ if __name__ == "__main__":
 
             # if running as a background process just print progress
             if args.background:
-                print(f'{i}/{total}', flush=True)
+                print(f'{i+1}/{total}', flush=True)
             
             scan_file(file=wav_file,
                         data_params=data_params,
@@ -104,15 +103,19 @@ if __name__ == "__main__":
             print()
     
     # results path
-    path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "scan_results.csv")
+    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "scan_results.csv")
+    img_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results")
 
-    if os.path.exists(path):
-        df = pd.read_csv(path)
+    if os.path.exists(csv_path):
+        df = pd.read_csv(csv_path)
     else:
-        raise RuntimeError(f'{path} does not exist, you must scan the data before plotting')
+        raise RuntimeError(f'{csv_path} does not exist, you must scan the data before plotting')
 
     # get sensors in results CSV
     sensors = list(set(df["sensor"]))
+
+    if args.sensor not in sensors:
+        raise ValueError(f"no scanned files from sensor {args.sensor}")
     
     # make dictionary from file --> start time
     wav_files, xml_files = [], []
@@ -125,12 +128,10 @@ if __name__ == "__main__":
     start_time_dict = dict(zip(wav_files, start_times))
     end_time_dict = dict(zip(wav_files, end_times))
 
-    seen_files = []
-    for f in df['file_name']:
-        
-        # skip if we've seen file already
-        if f in seen_files:
-            continue
+    files = list(set(df['file_name']))
+    fig_all, ax_all = plt.subplots(len(files), 1)
+    fig_all.subplots_adjust(hspace=0.5)
+    for i, f in enumerate(files):
         
         # filter by chosen sensor and current file
         df_file = df[(df['sensor'] == args.sensor) & (df['file_name'] == f)].copy()
@@ -142,13 +143,31 @@ if __name__ == "__main__":
         bins_dt = pd.date_range(start=start_time_dict[f], end=end_time_dict[f], freq="2min")
         
         # bin labels are left edge
-        bins_str = bins_dt.astype(str).values
-        labels = [bins_dt[i-1] for i in range(1, len(bins_str))]
+        # bins_str = bins_dt.astype(str).values
+        # labels = [bins_dt[i-1] for i in range(1, len(bins_str))]
         
-        hist_vals = pd.to_datetime(pd.cut(df_file["global_timestamp"], bins=bins_dt, labels=labels).dropna())
-        plt.hist(hist_vals, bins=bins_dt)
-        plt.grid()
-        plt.savefig('test.png')
+        hist_vals = pd.to_datetime(pd.cut(df_file["global_timestamp"], bins=bins_dt, labels=bins_dt[:-1]).dropna())
+        hist, bins = np.histogram(hist_vals, bins=bins_dt)
+        
+        # get x limits for plots
+        x_lims = mdates.date2num(bins_dt)
 
-        seen_files.append(f)
-        break
+        # add to aggregate plot
+        ax_all[i].imshow(hist[np.newaxis,:], cmap="plasma", aspect="auto", extent=[x_lims[0], x_lims[-1], 0, 1])
+        ax_all[i].set_yticks([])
+        ax_all[i].set_xticks([])
+
+        # file figure
+        fig, ax = plt.subplots(1, 1)
+        im = ax.imshow(hist[np.newaxis,:], cmap="plasma", aspect="auto", extent=[x_lims[0], x_lims[-1], 0, 1])
+        plt.colorbar(im, ax=ax, label="Detection Count")
+        ax.xaxis_date()
+        date_format = mdates.DateFormatter('%D -- %H:%M:%S')
+        ax.xaxis.set_major_formatter(date_format)
+        ax.set_title(f.split('/')[-1])
+        fig.autofmt_xdate()
+        fig.savefig(os.path.join(img_path, f.split('/')[-1].split('.wav')[0] + ".png"))
+        plt.close(fig)
+
+    fig_all.savefig(os.path.join(img_path, 'all_files.png'))
+    plt.close(fig_all)
