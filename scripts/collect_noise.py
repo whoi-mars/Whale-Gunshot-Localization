@@ -9,6 +9,16 @@ from tqdm import tqdm
 
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 
+# parse input arguments
+parser = argparse.ArgumentParser(description="Collect examples randomly from experimental data to serve as noise-only examples for training.")
+parser.add_argument('-n', '--number', type=int, default=10000,
+                    help='number of examples to collect (default: 10000')
+parser.add_argument('-fs', '--sample_rate', type=float, default=12000,
+                    help='desired sample rate at which to save the collected examples (default: 12000 Hz)')
+parser.add_argument('-T', '--duration', type=float, default=6,
+                    help='desired signal duration for each collected example (default: 6 s)')
+args = parser.parse_args()
+
 def read_audio_section(wav_path, start_time, end_time, sr):
     """
     Read a section of a WAV file.
@@ -98,15 +108,5 @@ def collect_noise(n, fs_target, T_target):
     hdf5storage.savemat(os.path.join(PROJECT_ROOT_DIR, 'noise_collect_ccb_6s.mat'), mdict, format='7.3')
 
 if __name__ == "__main__":
-    
-    # parse input arguments
-    parser = argparse.ArgumentParser(description="Collect examples randomly from experimental data to serve as noise-only examples for training.")
-    parser.add_argument('-n', '--number', type=int, default=10000,
-                        help='number of examples to collect (default: 10000')
-    parser.add_argument('-fs', '--sample_rate', type=float, default=12000,
-                        help='desired sample rate at which to save the collected examples (default: 12000 Hz)')
-    parser.add_argument('-T', '--duration', type=float, default=6,
-                        help='desired signal duration for each collected example (default: 6 s)')
-    args = parser.parse_args()
 
     collect_noise(n=args.number, fs_target=args.sample_rate, T=args.duration)
