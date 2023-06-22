@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 from whale_gunshot_localization.models.tcn_archs import TCNRangeAndClassify
-from whale_gunshot_localization.utils.experimental import ClipAnalyzer, l2_standardize
+from whale_gunshot_localization.utils.experimental import ClipAnalyzer, l2_standardize, sort_wav_chronological
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 from scan_file import scan_file
 
@@ -26,34 +26,6 @@ parser.add_argument('-c', '--chunk_size', type=float, default=160, required=Fals
 parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
 args = parser.parse_args()
-
-def sort_wav_chronological(wav_files, xml_files):
-
-    start_times = []
-    end_times = []
-
-    for wf in wav_files:
-
-        # get corresponding xml file
-        xml_file = wf.split('.wav')[0] + ".log.xml"
-
-        # get start time
-        with open(xml_file, 'r') as f:
-            data = f.read()
-        data = BeautifulSoup(data, features='lxml')
-        start_time = np.datetime64(data.find_all("wavfilehandler", samplingstarttimelocal=True)[0]['samplingstarttimelocal'])
-        end_time = np.datetime64(data.find_all("wavfilehandler", samplingstoptimelocal=True)[0]['samplingstoptimelocal'])
-        start_times.append(start_time)
-        end_times.append(end_time)
-
-    # get sorted indices
-    idx_sorted = np.argsort(start_times)
-
-    start_times = np.asarray(start_times)
-    end_times = np.asarray(end_times)
-    
-    return wav_files[idx_sorted], start_times[idx_sorted], end_times[idx_sorted]
-
 
 if __name__ == "__main__":
     
@@ -75,10 +47,9 @@ if __name__ == "__main__":
 
         # get files
         wav_files = np.asarray(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], str(args.sensor), "*.wav")))
-        xml_files = np.asarray(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], str(args.sensor), "*.xml")))
 
         # sort wav files chronologically
-        wav_files, start_times, end_times = sort_wav_chronological(wav_files, xml_files)
+        wav_files, start_times, end_times = sort_wav_chronological(wav_files)
 
         data_params = {'mu_list' : np.load(config['dataset']['data_directory'] + '/mean_range_classification.npy', allow_pickle=True),
                     'std_list' : np.load(config['dataset']['data_directory'] + '/std_range_classification.npy', allow_pickle=True),
@@ -102,7 +73,7 @@ if __name__ == "__main__":
                         background=args.background)
             print()
     
-    # results path
+    # results paths
     csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "scan_results.csv")
     img_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results")
 
@@ -118,13 +89,11 @@ if __name__ == "__main__":
         raise ValueError(f"no scanned files from sensor {args.sensor}")
     
     # make dictionary from file --> start time
-    wav_files, xml_files = [], []
+    wav_files = []
     for sensor in sensors:
         wav_files.extend(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], str(sensor), "*.wav")))
-        xml_files.extend(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], str(sensor), "*.xml")))
     wav_files = np.asarray(wav_files)
-    xml_files = np.asarray(xml_files)
-    wav_files, start_times, end_times = sort_wav_chronological(wav_files, xml_files)
+    wav_files, start_times, end_times = sort_wav_chronological(wav_files)
     start_time_dict = dict(zip(wav_files, start_times))
     end_time_dict = dict(zip(wav_files, end_times))
 
@@ -141,10 +110,6 @@ if __name__ == "__main__":
         
         # get bin edges
         bins_dt = pd.date_range(start=start_time_dict[f], end=end_time_dict[f], freq="2min")
-        
-        # bin labels are left edge
-        # bins_str = bins_dt.astype(str).values
-        # labels = [bins_dt[i-1] for i in range(1, len(bins_str))]
         
         hist_vals = pd.to_datetime(pd.cut(df_file["global_timestamp"], bins=bins_dt, labels=bins_dt[:-1]).dropna())
         hist, bins = np.histogram(hist_vals, bins=bins_dt)
