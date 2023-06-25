@@ -9,6 +9,7 @@ dataset:
 TOSSIT:
   TOSSIT_y: [0, -3.521161e+03, -3.521161e+03, 3.521161e+03, 3.521161e+03, ]
   TOSSIT_x: [0, -3.509998e+03, 3.578822e+03, -3.513494e+03, 3.582386e+03, ]
+  ids: ["6474", "6470", "6471", "6476", "6468"]
 signal:
   fs: 600 # [Hz]
   T: 6 # [s]
@@ -25,3 +26,4 @@ scaling:
   max_r: 32296
 models:
   checkpoints_directories: "/workspace/data/models"
+  model_dir: "/range_classify"

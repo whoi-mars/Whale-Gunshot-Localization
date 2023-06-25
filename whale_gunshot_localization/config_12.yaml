@@ -1,0 +1,28 @@
+dataset:
+  data_directory: "/workspace/data/TOSSIT_sims"
+  entry_keys: [T, data, fs, labels, t_dec_max, t_dec_min, class_labels, range_labels]
+  exp_data_directory: "/workspace/data/TOSSIT_experimental_data"
+  ccb_data_directory: ""
+  exp_data_file: ""
+  sandbox_data_file: ""
+  noise_data: ""
+TOSSIT:
+  TOSSIT_y: [0, -5.003756e+03, -1.000751e+04, -1.000751e+04, -1.000751e+04, -1.000751e+04, -5.003756e+03, -6.486350e+02, -9.266214e+01, -5.003756e+03, -5.096418e+03, -9.266214e+01, ]
+  TOSSIT_x: [0, 0, 0, 5.026815e+03, 1.026021e+04, 1.501158e+04, 1.502220e+04, 1.537618e+04, 1.006771e+04, 9.991828e+03, 4.961394e+03, 5.033853e+03, ]
+signal:
+  fs: 600 # [Hz]
+  T: 6 # [s]
+stft:
+  window: "hann"
+  nperseg: 62
+  noverlap: 53
+  nfft: 463
+scaling:
+  max_x: 16859.485670
+  min_x: -4353.063923
+  max_y: 14269.970081
+  min_y: -14269.970081
+  max_r: 31065.950964
+models:
+  checkpoints_directories: "/workspace/data/models"
+  model_dir: "/range_classify"
