@@ -9,6 +9,7 @@ import torch
 from scipy.signal import find_peaks
 from scipy.optimize import minimize
 import gtsam
+import pandas as pd
 
 import hypernetx as hnx
 import hypernetx.algorithms.hypergraph_modularity as hmod
@@ -112,6 +113,88 @@ def get_matching_files(TOSSIT_dirs, minimum_file_duration=10, closeness_threshol
             matching_files.append(group)
 
     return matching_files
+
+def sort_wav_chronological(wav_files):
+    """
+    Sort wav file by start time and grab the start and end times
+    for each of the files
+
+    Parameters
+    ----------
+    wav_files : List[str]
+        full path to each of the WAV files
+    
+    Returns
+    -------
+    wav_files : List[str]
+        list of full paths to each of the WAV files sorted by start time
+    start_times : List[np.datetime64]
+        sorted list of start times
+    end_times : List[np.datetime64]
+        list of end times sorted by corresponding start times
+    """
+
+    start_times = []
+    end_times = []
+
+    for wf in wav_files:
+
+        # get corresponding xml file
+        xml_file = wf.split('.wav')[0] + ".log.xml"
+        if not os.path.exists(xml_file):
+            raise IOError(f"Corresponding XML file {xml_file} does not exist")
+
+        # get start time
+        with open(xml_file, 'r') as f:
+            data = f.read()
+        data = BeautifulSoup(data, features='lxml')
+        start_time = np.datetime64(data.find_all("wavfilehandler", samplingstarttimelocal=True)[0]['samplingstarttimelocal'])
+        end_time = np.datetime64(data.find_all("wavfilehandler", samplingstoptimelocal=True)[0]['samplingstoptimelocal'])
+        start_times.append(start_time)
+        end_times.append(end_time)
+
+    # get sorted indices
+    idx_sorted = np.argsort(start_times)
+
+    start_times = np.asarray(start_times)
+    end_times = np.asarray(end_times)
+    
+    return wav_files[idx_sorted], start_times[idx_sorted], end_times[idx_sorted]
+
+def get_wav_day(wav_file, timestamp):
+    """
+    Get the day given a WAV file and a timestamp (in seconds).
+
+    Parameters
+    ----------
+    wav_file : str
+        full path to the WAV file
+    timestamp : float
+        timestamp (in seconds) for the provided WAV file
+
+    Returns
+    -------
+    pd.datetime.date
+        date of the timestamp within the provided WAV file
+    """
+
+    # get corresponding XML file
+    xml_file = wav_file.split('.wav')[0] + ".log.xml"
+    if not os.path.exists(xml_file):
+        raise IOError(f"Corresponding XML file {xml_file} does not exist")
+    
+    # get start time
+    with open(xml_file, 'r') as f:
+        data = f.read()
+    data = BeautifulSoup(data, features='lxml')
+    start_time = np.datetime64(data.find_all("wavfilehandler", samplingstarttimelocal=True)[0]['samplingstarttimelocal'])
+
+    # get time of timestamp
+    curr_time = start_time + np.timedelta64(timestamp, 's')
+
+    # extract day
+    pd_curr_time = pd.to_datetime(curr_time)
+    return pd_curr_time.date()
 
 class Localizer:
     """
