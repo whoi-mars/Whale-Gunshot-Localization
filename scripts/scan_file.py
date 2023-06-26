@@ -1,5 +1,7 @@
 import os
 import argparse
+import sys
+import warnings
 
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -11,7 +13,7 @@ from scipy import signal
 import torch
 
 from whale_gunshot_localization.models.tcn_archs import TCNRangeAndClassify
-from whale_gunshot_localization.utils.experimental import ClipAnalyzer, l2_standardize
+from whale_gunshot_localization.utils.experimental import ClipAnalyzer, l2_standardize, get_wav_timestamp
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 
 def scan_file(file, data_params, overlap_fraction, chunk_size, model, device, background=False):
@@ -54,7 +56,7 @@ def scan_file(file, data_params, overlap_fraction, chunk_size, model, device, ba
 
     # make results CSV file if it doesn't exist
     if not os.path.exists(csv_path):
-        pd.DataFrame(columns=["sensor", "file_name", "timestamp"]).to_csv(csv_path, index=False)
+        pd.DataFrame(columns=["sensor", "file_name", "timestamp", "global_timestamp", "range"]).to_csv(csv_path, index=False)
 
     # clip analyzer
     CA = ClipAnalyzer(model, 
@@ -69,6 +71,8 @@ def scan_file(file, data_params, overlap_fraction, chunk_size, model, device, ba
     
     # return if nothing to scan
     if file_duration < data_params['T']:
+        warnings.warn(f"The duration of {file} is shorter than the considered signal duration.")
+        sys.stderr.flush()
         return
 
     pointer = 0
@@ -84,7 +88,12 @@ def scan_file(file, data_params, overlap_fraction, chunk_size, model, device, ba
             imgs, range_measurements, timestamps = CA.process_clips(y)[0]
 
             if len(timestamps):
-                new_row = pd.DataFrame({'sensor' : [sensor for _ in timestamps], 'file_name' : [file for _ in timestamps], 'timestamp' : [pointer + t for t in timestamps]})
+                row_dict['sensor'] = [sensor for _ in timestamps]
+                row_dict['file_name'] = [file for _ in timestamps]
+                row_dict['timestamp'] = [pointer + t for t in timestamps]
+                row_dict['global_timestamp'] = [get_wav_timestamp(f, int((ts) * 1000)) for f, ts in zip(row_dict['file_name'], row_dict['timestamp'])]
+                row_dict['rnage'] = [range_measurement for range_measurement in range_measurements]
+                new_row = pd.DataFrame(row_dict)
                 new_row.to_csv(csv_path, mode='a', index=False, header=False)
                 
                 # for i in imgs:
