@@ -6,10 +6,12 @@ import warnings
 from bs4 import BeautifulSoup
 import numpy as np
 import torch
+from scipy.signal import resample_poly
 from scipy.signal import find_peaks
 from scipy.optimize import minimize
 import gtsam
 import pandas as pd
+import librosa
 
 import hypernetx as hnx
 import hypernetx.algorithms.hypergraph_modularity as hmod
@@ -161,16 +163,16 @@ def sort_wav_chronological(wav_files):
     
     return wav_files[idx_sorted], start_times[idx_sorted], end_times[idx_sorted]
 
-def get_wav_day(wav_file, timestamp):
+def get_wav_timestamp(wav_file, timestamp):
     """
-    Get the day given a WAV file and a timestamp (in seconds).
+    Get the full global timestamp given a WAV file and a timestamp (in milliseconds).
 
     Parameters
     ----------
     wav_file : str
         full path to the WAV file
     timestamp : float
-        timestamp (in seconds) for the provided WAV file
+        timestamp (in milliseconds) for the provided WAV file
 
     Returns
     -------
@@ -190,11 +192,139 @@ def get_wav_day(wav_file, timestamp):
     start_time = np.datetime64(data.find_all("wavfilehandler", samplingstarttimelocal=True)[0]['samplingstarttimelocal'])
 
     # get time of timestamp
-    curr_time = start_time + np.timedelta64(timestamp, 's')
+    return start_time + np.timedelta64(timestamp, 'ms')
 
-    # extract day
-    pd_curr_time = pd.to_datetime(curr_time)
-    return pd_curr_time.date()
+class WAVReader:
+    """
+    Class to read a chunk of audio starting as a particular timestamp 
+    from multiple sensors.
+
+    ...
+
+    Attributes
+    ----------
+    chunk_size : float
+        size of audio to return starting at provided timestamp
+    sensors : List[str]
+        list of sensor IDs to load in the order they are desired
+        to be loaded
+    bin_lists : List[List[datetime]]
+        each sublist contains the bin edges which are defined by the
+        start and end times of of the WAV files of the sensor associated
+        with the sublist
+    bin_maps : List[Dict]
+        each subdictionary is a mapping from timestamp bin number
+        to file path
+    end_time_map : List[Dict]
+        each subdictionary is a mapping from a file path to the
+        start time of the file
+    start_time_map : List[Dict]
+        each subdictionary is a mapping from a file path to the
+        end time of the file
+    """
+
+    def __init__(self, sensors, chunk_size):
+        """
+        Construct lists and mappings to use to grab timestamps
+        from each sensor
+
+        Parameters
+        ----------
+        chunk_size : float
+            size of audio to return starting at provided timestamp
+        sensors : List[str]
+            list of sensor IDs to load in the order they are desired
+            to be loaded
+        """
+
+        # duration of returned audio clips
+        self.chunk_size = chunk_size
+
+        # sensors to grab audio from
+        self.sensors = sensors
+
+        # sorted bin edges for each sensor
+        self.bin_lists = []
+        
+        # list of dicts, each maps bin number to WAV file
+        self.bin_maps = []
+
+        # list of dicts, each maps WAV file to start/end time
+        self.end_time_map = []
+        self.start_time_map = []
+
+        # populate above lists
+        for sensor in sensors:
+            # get WAV files for sensor
+            wav_files = np.asarray(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], sensor, "*.wav")))
+
+            # sort wav files and make start/end time dictionaries
+            wav_files, start_times, end_times = sort_wav_chronological(wav_files)
+            self.end_time_map.append(dict(zip(wav_files, end_times)))
+            self.start_time_map.append(dict(zip(wav_files, start_times)))
+            
+            # fill some initial elements
+            bins = [start_times[0], end_times[0]]
+            bin_map = {0 : wav_files[0]}
+            
+            bin_num = 1
+            for i in range(1, len(wav_files)):
+                # if start time sufficiently close to last end time, don't include it
+                if start_times[i] - bins[-1] > np.timedelta64(30, 's'):
+                    bins.append(start_times[i])
+                    bin_num += 1
+                
+                # save bin edge and bin number
+                bins.append(end_times[i])
+                bin_num += 1
+                bin_map[bin_num] = wav_files[i] 
+
+            # save list of files, bin edges, and mapping from bin number to file
+            self.bin_lists.append(np.asarray(bins))
+            self.bin_maps.append(bin_map)
+
+    def get_audio(self, timestamp):
+        """
+        Get audio chunks which start at the specified timestamp
+        from deisred sensors.
+
+        Parameters
+        ----------
+        timestamp : datetime-like
+            timestamp which marks the beginning of the returned audio chunks
+        
+        Returns
+        -------
+        bool
+            whether or not the retrieval was successful. if not successful, it is likely
+            because the timestamp does not exist for all provided sensors or the combination
+            of timestamp and chunk size spans multiple files on at least one of the provided
+            sensors.
+        data : List[array-like]
+            list of each of the timeseries extracted from each sensor in the same order in which
+            the sensors were provided
+        """
+
+        files = []
+        for idx, sensor in enumerate(self.sensors):
+            # get correct file based on timestamp
+            file = self.bin_maps[idx].get(np.digitize(timestamp.view('i8'), bins=self.bin_lists[idx].view('i8')))
+            
+            # if a file exists in that time range save it, if not we return
+            if file is not None and timestamp + np.timedelta64(self.chunk_size, 's') < self.end_time_map[idx][file]:
+                files.append(file)
+            else:
+                return False, []
+
+        # if all files and corresponding time stamp are valid get audio
+        data = []
+        for idx, file in enumerate(files):
+            file_timestamp = (timestamp - self.start_time_map[idx][file]).astype('timedelta64[s]').astype(float)
+            file_samplerate = librosa.get_samplerate(path=file)
+            y, _ = librosa.load(file, sr=file_samplerate, offset=file_timestamp, duration=self.chunk_size)
+            data.append(y)
+        
+        return True, data
 
 class Localizer:
     """
@@ -801,7 +931,14 @@ class ClipAnalyzer:
     def _filter_model_outputs(self, examples, outputs):
         """
         Filter out unique call detections from the analysis of
-        a batch of overlapping snippets of experimental data. 
+        a batch of overlapping snippets of experimental data.
+
+        Parameters
+        ----------
+        examples : array-like
+            list of inputs to the model from the input clips 
+        outputs :  array-like
+            model output
         """
         
         # get boolean vector of detections
@@ -837,6 +974,9 @@ class ClipAnalyzer:
         return examples, (outputs[:,0]*config['scaling']['max_r']).numpy(), timestamps
 
     def process_clips(self, clips):
+        """
+        Scan clips
+        """
 
         # get batch of windows
         collated_batch = self._collate_samples(clips)
