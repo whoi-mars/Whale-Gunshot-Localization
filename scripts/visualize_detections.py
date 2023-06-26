@@ -17,7 +17,7 @@ from scan_file import scan_file
 parser = argparse.ArgumentParser(description="Scan all files in sensor.")
 parser.add_argument('--scan', action='store_true',
                     help='whether to scan before plotting')
-parser.add_argument('--sensor', '-s', type=int, required=True,
+parser.add_argument('--sensor', '-s', type=int, nargs='+', default=config['TOSSIT']['ids'],
                     help='which sensor to scan')
 parser.add_argument('-o', '--overlap_fraction', type=float, default=0.75, metavar="[float in (0, 1)]", required=False,
                     help='how much window to overlap when scanning the file (default: 0.75)')
@@ -45,33 +45,35 @@ if __name__ == "__main__":
         state_dict = torch.load(os.path.join(config['models']['checkpoints_directories'] + '/range_classify', 'weights_best.pt'), map_location=device)
         model.load_state_dict(state_dict['model_state_dict'])
 
-        # get files
-        wav_files = np.asarray(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], str(args.sensor), "*.wav")))
+        for idx, sensor in enumerate(args.sensor):
+            print(f"sensor: {sensor} -- ({idx+1}/{len(args.sensor)})\n")
 
-        # sort wav files chronologically
-        wav_files, start_times, end_times = sort_wav_chronological(wav_files)
+            # get files
+            wav_files = np.asarray(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], str(sensor), "*.wav")))
 
-        data_params = {'mu_list' : np.load(config['dataset']['data_directory'] + '/mean_range_classification.npy', allow_pickle=True),
-                    'std_list' : np.load(config['dataset']['data_directory'] + '/std_range_classification.npy', allow_pickle=True),
-                    'fs' : config['signal']['fs'],
-                    'T' : config['signal']['T'],}
+            # sort wav files chronologically
+            wav_files, start_times, end_times = sort_wav_chronological(wav_files)
 
-        # scan file
-        total = len(wav_files)
-        for i, wav_file in enumerate(wav_files):
+            data_params = {'mu_list' : np.load(config['dataset']['data_directory'] + '/mean_range_classification.npy', allow_pickle=True),
+                        'std_list' : np.load(config['dataset']['data_directory'] + '/std_range_classification.npy', allow_pickle=True),
+                        'fs' : config['signal']['fs'],
+                        'T' : config['signal']['T'],}
 
-            # if running as a background process just print progress
-            if args.background:
+            # scan file
+            total = len(wav_files)
+            for i, wav_file in enumerate(wav_files):
+
+                # if running as a background process just print progress
                 print(f'{i+1}/{total}', flush=True)
-            
-            scan_file(file=wav_file,
-                        data_params=data_params,
-                        overlap_fraction=args.overlap_fraction, 
-                        chunk_size=args.chunk_size, 
-                        model=model,
-                        device=device,
-                        background=args.background)
-            print()
+                
+                scan_file(file=wav_file,
+                          data_params=data_params,
+                          overlap_fraction=args.overlap_fraction, 
+                          chunk_size=args.chunk_size, 
+                          model=model,
+                          device=device,
+                          background=args.background)
+                print()
     
     # results paths
     csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "scan_results.csv")
@@ -85,9 +87,10 @@ if __name__ == "__main__":
     # get sensors in results CSV
     sensors = list(set(df["sensor"]))
 
-    if args.sensor not in sensors:
+    # check that desired sensors are in the saved data
+    if any(int(s) not in sensors for s in args.sensor):
         raise ValueError(f"no scanned files from sensor {args.sensor}")
-    
+
     # make dictionary from file --> start time
     wav_files = []
     for sensor in sensors:
@@ -97,42 +100,51 @@ if __name__ == "__main__":
     start_time_dict = dict(zip(wav_files, start_times))
     end_time_dict = dict(zip(wav_files, end_times))
 
-    files = list(set(df['file_name']))
-    fig_all, ax_all = plt.subplots(len(files), 1)
-    fig_all.subplots_adjust(hspace=0.5)
-    for i, f in enumerate(files):
-        
-        # filter by chosen sensor and current file
-        df_file = df[(df['sensor'] == args.sensor) & (df['file_name'] == f)].copy()
+    # add global timestamp to df
+    df['global_timestamp'] = df.apply(lambda row : start_time_dict[row['file_name']] + np.timedelta64(int(row['timestamp'] * 1000), 'ms'), axis=1)
+    
+    # bins each detection
+    bins = pd.date_range(start=df['global_timestamp'].min().date(), end=df['global_timestamp'].max().date() + pd.Timedelta(1, "d"), freq="D")
+    df["bin"] = pd.to_datetime(pd.cut(df["global_timestamp"], bins=bins, labels=bins[:-1]))
+    
+    # create plots of detections for each day
+    for day in bins[:-1]:
 
-        # add column with timestamp relative to global time
-        df_file['global_timestamp'] = df_file.apply(lambda row : start_time_dict[row['file_name']] + np.timedelta64(int(row['timestamp'] * 1000), 'ms'), axis=1)
-        
-        # get bin edges
-        bins_dt = pd.date_range(start=start_time_dict[f], end=end_time_dict[f], freq="2min")
-        
-        hist_vals = pd.to_datetime(pd.cut(df_file["global_timestamp"], bins=bins_dt, labels=bins_dt[:-1]).dropna())
-        hist, bins = np.histogram(hist_vals, bins=bins_dt)
-        
-        # get x limits for plots
-        x_lims = mdates.date2num(bins_dt)
+        # bins to chunks the day's detections
+        day_bins = pd.date_range(start=day, end=day + pd.Timedelta(1, "d"), freq="2min")
 
-        # add to aggregate plot
-        ax_all[i].imshow(hist[np.newaxis,:], cmap="plasma", aspect="auto", extent=[x_lims[0], x_lims[-1], 0, 1])
-        ax_all[i].set_yticks([])
-        ax_all[i].set_xticks([])
+        histograms = []
+        for sensor in args.sensor:
 
-        # file figure
-        fig, ax = plt.subplots(1, 1)
-        im = ax.imshow(hist[np.newaxis,:], cmap="plasma", aspect="auto", extent=[x_lims[0], x_lims[-1], 0, 1])
-        plt.colorbar(im, ax=ax, label="Detection Count")
-        ax.xaxis_date()
-        date_format = mdates.DateFormatter('%D -- %H:%M:%S')
-        ax.xaxis.set_major_formatter(date_format)
-        ax.set_title(f.split('/')[-1])
+            # get df for a particular sensor on a particular day
+            sub_df = df[(df["sensor"] == int(sensor)) & (df["bin"] == day)]
+
+            # calculate historgram
+            hist_vals = pd.cut(sub_df["global_timestamp"], bins=day_bins, labels=np.arange(len(day_bins[:-1])) + 1)
+            hist, _ = np.histogram(hist_vals, bins=np.arange(len(day_bins[:-1])) + 0.5)
+            histograms.append(hist)
+
+        # get max bin count to calibrate colorbar, and skip day if max bin count is 0
+        max_count = max(max(hist) for hist in histograms)
+        if max_count == 0:
+            continue
+        
+        # make day plot
+        fig, axs = plt.subplots(len(args.sensor), 1, sharex=True)
+        x_lims = mdates.date2num(day_bins)
+
+        for hist, ax, sensor in zip(histograms, axs, args.sensor):
+            im = ax.imshow(hist[np.newaxis,:], cmap="plasma", aspect="auto", extent=[x_lims[0], x_lims[-1], 0, 1], vmin=0, vmax=max_count)
+            ax.set_title(f"sensor {sensor}")
+            ax.set_yticks([])
+
+        axs[0].xaxis_date()
+        date_format = mdates.DateFormatter('%H:%M:%S')
+        axs[0].xaxis.set_major_formatter(date_format)
         fig.autofmt_xdate()
-        fig.savefig(os.path.join(img_path, f.split('/')[-1].split('.wav')[0] + ".png"))
-        plt.close(fig)
-
-    fig_all.savefig(os.path.join(img_path, 'all_files.png'))
-    plt.close(fig_all)
+        fig.suptitle(str(day.date()), fontsize=20)
+        fig.tight_layout()
+        fig.subplots_adjust(right=0.8)
+        cbar_ax = fig.add_axes([0.86, 0.16, 0.05, 0.7])
+        fig.colorbar(im, cax=cbar_ax, label="Counts")
+        fig.savefig(os.path.join(img_path, f"{day.date()}.png"))
