@@ -6,8 +6,7 @@ import warnings
 from bs4 import BeautifulSoup
 import numpy as np
 import torch
-from scipy.signal import resample_poly
-from scipy.signal import find_peaks
+from scipy.signal import resample_poly, find_peaks
 from scipy.optimize import minimize
 import gtsam
 import pandas as pd
@@ -223,7 +222,7 @@ class WAVReader:
         end time of the file
     """
 
-    def __init__(self, sensors, chunk_size):
+    def __init__(self, sensors, chunk_size, fs_desired=None):
         """
         Construct lists and mappings to use to grab timestamps
         from each sensor
@@ -236,6 +235,9 @@ class WAVReader:
             list of sensor IDs to load in the order they are desired
             to be loaded
         """
+
+        # desired fs
+        self.fs_desired = fs_desired
 
         # duration of returned audio clips
         self.chunk_size = chunk_size
@@ -265,9 +267,9 @@ class WAVReader:
             
             # fill some initial elements
             bins = [start_times[0], end_times[0]]
-            bin_map = {0 : wav_files[0]}
+            bin_map = {1 : wav_files[0]}
             
-            bin_num = 1
+            bin_num = 2
             for i in range(1, len(wav_files)):
                 # if start time sufficiently close to last end time, don't include it
                 if start_times[i] - bins[-1] > np.timedelta64(30, 's'):
@@ -276,8 +278,8 @@ class WAVReader:
                 
                 # save bin edge and bin number
                 bins.append(end_times[i])
-                bin_num += 1
-                bin_map[bin_num] = wav_files[i] 
+                bin_map[bin_num] = wav_files[i]
+                bin_num += 1 
 
             # save list of files, bin edges, and mapping from bin number to file
             self.bin_lists.append(np.asarray(bins))
@@ -307,14 +309,15 @@ class WAVReader:
 
         files = []
         for idx, sensor in enumerate(self.sensors):
+
             # get correct file based on timestamp
             file = self.bin_maps[idx].get(np.digitize(timestamp.view('i8'), bins=self.bin_lists[idx].view('i8')))
-            
+
             # if a file exists in that time range save it, if not we return
             if file is not None and timestamp + np.timedelta64(self.chunk_size, 's') < self.end_time_map[idx][file]:
                 files.append(file)
             else:
-                return False, []
+                return False, np.asarray([]), np.asarray([])
 
         # if all files and corresponding time stamp are valid get audio
         data = []
@@ -322,9 +325,11 @@ class WAVReader:
             file_timestamp = (timestamp - self.start_time_map[idx][file]).astype('timedelta64[s]').astype(float)
             file_samplerate = librosa.get_samplerate(path=file)
             y, _ = librosa.load(file, sr=file_samplerate, offset=file_timestamp, duration=self.chunk_size)
+            if self.fs_desired:
+                y = resample_poly(y, self.fs_desired, file_samplerate)
             data.append(y)
         
-        return True, data
+        return True, np.asarray(files), np.asarray(data)
 
 class Localizer:
     """
@@ -522,7 +527,8 @@ class Localizer:
         H = (-2 / N)*(np.einsum('ij,kj->jik', p_i, p_i).sum(axis=0)) + (2*c @ c.T)
         
         if np.linalg.matrix_rank(H) < 2:
-            raise RuntimeError('H matrix not full rank.')
+            cost, loc = self._localize_opt(ranges, sensors_idx)
+            return cost, loc
         else:
             # check if approximation holds to make H matrix.
             # if not, use gradient-based localization
@@ -613,6 +619,9 @@ class Localizer:
         #                  build hypergraph                  #
         ######################################################
 
+        # memoize localization
+        memo = dict()
+
         adaptive_thresh = self.consistency_thresh
         while True:
             # get all combinations of sensor indices
@@ -645,7 +654,11 @@ class Localizer:
                             break
 
                         # get trilateration cost for candidate
-                        _, loc = self._localize(self._linear_measurements[range_subcombo], s_subcombo)
+                        key = (tuple(sorted(s_subcombo)), tuple(sorted(range_subcombo)))
+                        if key in memo.keys():
+                            loc = memo[key]
+                        else:
+                            _, loc = self._localize(self._linear_measurements[range_subcombo], s_subcombo)
 
                         r = (set(range_combo) - set(range_subcombo)).pop()
                         s = (set(s_comb) - set(s_subcombo)).pop()
@@ -990,3 +1003,24 @@ class ClipAnalyzer:
 
         # filter unique detections and ranges
         return [self._filter_model_outputs(preprocessed_batch[:,i,...].to('cpu'), outputs[i]) for i in range(preprocessed_batch.shape[1])]
+
+if __name__ == "__main__":
+    wr = WAVReader(sensors=config['TOSSIT']['ids'], chunk_size=160)
+    ts = np.datetime64('2022-03-30T00:15:40')
+    success, files, d = wr.get_audio(ts)
+
+    # get files associated with first sensor in ordered_sensors list
+    wav_files = []
+    for s in config['TOSSIT']['ids']:
+        wav_files.extend(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], s, "*.wav")))
+    wav_files = np.asarray(wav_files)
+
+    # sort wav files in chonological order by start time
+    wav_files, start_times, end_times = sort_wav_chronological(wav_files)
+    start_time_dict = dict(zip(wav_files, start_times))
+    end_time_dict = dict(zip(wav_files, end_times))
+
+    print(success)
+    print(ts)
+    for f in files:
+        print(start_time_dict[f], end_time_dict[f])
