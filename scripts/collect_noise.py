@@ -2,6 +2,7 @@ import os
 import argparse
 
 import hdf5storage
+import h5py
 import numpy as np
 import librosa
 from scipy.signal import resample_poly
@@ -17,6 +18,8 @@ parser.add_argument('-fs', '--sample_rate', type=float, default=12000,
                     help='desired sample rate at which to save the collected examples (default: 12000 Hz)')
 parser.add_argument('-T', '--duration', type=float, default=6,
                     help='desired signal duration for each collected example (default: 6 s)')
+parser.add_argument('-s', '--save_name', type=str, default='ccb_noise',
+                    help='name of data save files')
 args = parser.parse_args()
 
 def read_audio_section(wav_path, start_time, end_time, sr):
@@ -61,7 +64,7 @@ def collect_noise(n, fs_target, T_target):
     # get deepest directories in provided in data root which contain the WAV files
     all_dirs = []
     max_depth = 0
-    for path, subdirs, _ in os.walk(config['dataset']['data_directory']):
+    for path, subdirs, _ in os.walk(config['dataset']['ccb_data_directory']):
         for dir in subdirs:
             
             curr_path = os.path.join(path, dir)
@@ -103,10 +106,14 @@ def collect_noise(n, fs_target, T_target):
         wav = resample_poly(wav, fs_target, f_samplerate)
         X[i,:] = wav
 
+    with h5py.File(os.path.join(config['dataset']['data_directory'], f"{args.save_name}.h5"), "w") as f:
+        f.create_dataset('data', data=X, shape=X.shape, chunks=(1, X.shape[1]))
+        f.create_dataset('fs', data=args.sample_rate, shape=(1,)) 
+
     # save as MAT file
     mdict = {u'noise_from_data': X.T, u'fs': float(fs_target)}
-    hdf5storage.savemat(os.path.join(PROJECT_ROOT_DIR, 'noise_collect_ccb_6s.mat'), mdict, format='7.3')
+    hdf5storage.savemat(os.path.join(config['dataset']['data_directory'], f"{args.save_name}.mat"), mdict, format="7.3")
 
 if __name__ == "__main__":
 
-    collect_noise(n=args.number, fs_target=args.sample_rate, T=args.duration)
+    collect_noise(n=args.number, fs_target=args.sample_rate, T_target=args.duration)
