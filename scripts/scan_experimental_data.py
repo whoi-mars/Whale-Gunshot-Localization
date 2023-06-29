@@ -184,7 +184,7 @@ def scan_experimental_data(model, file, chunk_size, overlap_fraction, ordered_se
     CA = experimental.ClipAnalyzer(model, data_params, preprocessor=experimental.l2_standardize, device=device)
 
     # prepare localizer object
-    l = experimental.Localizer(k=4, consistency_thresh=1200, method_thresh=0.95, prune=False, grid=True)
+    l = experimental.Localizer(k=4, consistency_thresh=1200, method_thresh=0.95, prune=False, grid=False)
 
     # scan files
     pointer = 0
@@ -247,6 +247,7 @@ def scan_experimental_data(model, file, chunk_size, overlap_fraction, ordered_se
                     new_row = pd.DataFrame(row_dict)
                     new_row.to_csv(csv_path, mode='a', index=False, header=False)
             # update pointer and proress bar
+            l.reset()
             pointer += (chunk_size - (overlap_fraction * data_params['T']))
             pbar.update(1)
 
@@ -288,8 +289,8 @@ if __name__ == '__main__':
     df = pd.read_csv(csv_path)
 
     # get bin edges
-    bins_dt = pd.date_range(start=pd.to_datetime(start_time_dict[wav_files[0]]).date(), end=pd.to_datetime(end_time_dict[wav_files[-1]]).date(), freq="D")
-    df["bin"] = pd.to_datetime(pd.cut(pd.DatetimeIndex(df["global_timestamp"]), bins=bins_dt, labels=bins_dt[:-1]).dropna())
+    bins_dt = pd.date_range(start=pd.to_datetime(start_time_dict[wav_files[0]]).date(), end=(pd.to_datetime(end_time_dict[wav_files[-1]]) + pd.Timedelta(1, "d")).date(), freq="D")
+    df["bin"] = pd.to_datetime(pd.cut(pd.DatetimeIndex(df["global_timestamp"]), bins=bins_dt, labels=bins_dt[:-1]))
     bin_grouped = df.groupby(by="bin")
 
     # get locations
