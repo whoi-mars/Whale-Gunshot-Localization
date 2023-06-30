@@ -200,7 +200,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
 
             if (i % chunks_per_day == 0):
                 if background:
-                    print(f"{day_counter}/{total_days}\n", flush=True)
+                    print(f"day {day_counter}/{total_days}\n", flush=True)
                 day_counter += 1
                 pbar.reset()
                 pbar.set_postfix({'day': day_counter, 'total': total_days})
@@ -310,7 +310,7 @@ if __name__ == '__main__':
     Image.MAX_IMAGE_PIXELS = 729744000
     bathym = Image.open(os.path.join(config['dataset']['data_directory'], "mikesbathym.tif"))
 
-    # get locations
+    # make plots
     all_locs_est = []
     all_dates = []
     for _, dfg_bin in bin_grouped:
@@ -323,9 +323,12 @@ if __name__ == '__main__':
             y.append(dfg.loc[0,"y"])
             if date is None:
                 date = dfg.loc[0,"bin"]
-        # plot locations
+
+        # plot locations by day
         locs_est = np.stack([y, x], axis=1)
+        plot_localization(locs_est, title="CCB-2022 Location Estimates", save=os.path.join(PROJECT_ROOT_DIR, "scripts", "results", f"locations_{date.date()}.png"), bathym=bathym, dates=date.date())
         all_dates.append(date.date())
         all_locs_est.append(locs_est)
-        plot_localization(locs_est, title="CCB-2022 Location Estimates", save=os.path.join(PROJECT_ROOT_DIR, "scripts", "results", f"locations_{date.date()}.png"), bathym=bathym, dates=date.date())
+    
+    # plot all days
     plot_localization(all_locs_est, title="CCB-2022 Location Estimates", save=os.path.join(PROJECT_ROOT_DIR, "scripts", "results", f"locations_all_dates.png"), bathym=bathym, dates=all_dates)
