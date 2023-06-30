@@ -5,7 +5,7 @@ dataset:
   ccb_data_directory: "/workspace/data2/CCB_2023/acoustics"
   exp_data_file: ""
   sandbox_data_file: ""
-  noise_data: ""
+  noise_data: "ccb_noise_2023.h5"
 TOSSIT:
   TOSSIT_y: [0, -5.003756e+03, -1.000751e+04, -1.000751e+04, -1.000751e+04, -1.000751e+04, -5.003756e+03, -6.486350e+02, -9.266214e+01, -5.003756e+03, -5.096418e+03, -9.266214e+01, ]
   TOSSIT_x: [0, 0, 0, 5.026815e+03, 1.026021e+04, 1.501158e+04, 1.502220e+04, 1.537618e+04, 1.006771e+04, 9.991828e+03, 4.961394e+03, 5.033853e+03, ]
