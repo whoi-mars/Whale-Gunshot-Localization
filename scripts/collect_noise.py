@@ -14,7 +14,7 @@ from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 parser = argparse.ArgumentParser(description="Collect examples randomly from experimental data to serve as noise-only examples for training.")
 parser.add_argument('-n', '--number', type=int, default=10000,
                     help='number of examples to collect (default: 10000')
-parser.add_argument('-fs', '--sample_rate', type=float, default=12000,
+parser.add_argument('-fs', '--sample_rate', type=int, default=12000,
                     help='desired sample rate at which to save the collected examples (default: 12000 Hz)')
 parser.add_argument('-T', '--duration', type=float, default=6,
                     help='desired signal duration for each collected example (default: 6 s)')
