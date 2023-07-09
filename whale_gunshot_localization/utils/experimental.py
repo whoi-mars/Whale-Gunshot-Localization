@@ -396,7 +396,7 @@ class MultilaterationOpt(MultilaterationBase):
         is sufficient and determines whether to use closed-form or gradient-based localization approch
     """
 
-    def __init__(self, method_thresh, rng=None):
+    def __init__(self, method_thresh=0.95, rng=None):
         """
         Construct attributes.
 
@@ -543,8 +543,8 @@ class MultilaterationGrid(MultilaterationBase):
         # rng
         self.rng = rng if rng is not None else np.random.default_rng(np.random.randint(1,1000))
         
-        # make lookup table for ranges from each sensor
-        self._make_LUT()
+        # track when we've made LUT
+        self.LUT_exists = False
     
     def _make_LUT(self):
         """
@@ -563,6 +563,11 @@ class MultilaterationGrid(MultilaterationBase):
             self.LUT[t,...] = np.sqrt(((self.TOSSIT_locations[t,0] - self.Y) ** 2) + ((self.TOSSIT_locations[t,1] - self.X) ** 2))
     
     def localize(self, ranges, sensors_idx):
+
+        # check if we need to make LUT
+        if not self.LUT_exists:
+            self._make_LUT()
+            self.LUT_exists = True
 
         # calculate square error of measured ranges and ranges of each location
         ranges = ranges[:,np.newaxis,np.newaxis]
@@ -590,30 +595,13 @@ class Localizer:
     consistency_thresh : float
         threshold for distance from range to location to determine which measurements groups
         are self-consistent
-    method_thresh : float in [0, 1]
-        threshold to determine if approximation of H matrix from doi:10.1017/S0263574710000196
-        is sufficient and determines whether to use closed-form or gradient-based localization approch
     prune : bool
         whether to prune measurement groups based on lack of range measurement intersection
-    grid : bool
-        whether to use grid method of localization rather than the iterative optimization approach
-    rng : numpy.random._generator.Generator
-        optional RNG object
-    min_x : float
-        minimum x coordinate used to generate simulated data for detection/range estimation network training.
-        used to generate an initial guess for iterative optimization method.
-    max_x : float
-        maximum x coordinate used to generate simulated data for detection/range estimation network training.
-        used to generate an initial guess for iterative optimization method.
-    min_y : float
-        minimum y coordinate used to generate simulated data for detection/range estimation network training.
-        used to generate an initial guess for iterative optimization method.
-    max_y : float
-        maximum y coordinate used to generate simulated data for detection/range estimation network training.
-        used to generate an initial guess for iterative optimization method.
+    multilat : object
+        Python object used to perform multilateration
     """
     
-    def __init__(self, k, consistency_thresh=1000, method_thresh=0.95, prune=False, grid=False, rng=None):
+    def __init__(self, k, multilat, consistency_thresh=1000, prune=False):
         """
         Construct attributes
         
@@ -621,18 +609,13 @@ class Localizer:
         ----------
         k : int
             number of measurements to group when checking for measurement group consistency
+        multilat : object
+            Python object used to perform multilateration
         consistency_thresh : float
             threshold for distance from range to location to determine which measurements groups
             are self-consistent
-        method_thresh : float in [0, 1]
-            threshold to determine if approximation of H matrix from doi:10.1017/S0263574710000196
-            is sufficient and determines whether to use closed-form or gradient-based localization approch
         prune : bool
             whether to prune measurement groups based on lack of range measurement intersection
-        grid : bool
-            whether to use grid method of localization rather than the iterative optimization approach
-        rng : numpy.random._generator.Generator
-            optional RNG object
         """
         
         # load TOSSIT locations
@@ -655,140 +638,18 @@ class Localizer:
         
         # thresholds
         self.consistency_thresh = consistency_thresh
-        self.method_thresh = method_thresh
         
         # prune sets of k measurements based on pairwise intersection check
         self.prune = prune
-        
-        # get bounds of considered grid
-        self.min_x = config['scaling']['min_x']
-        self.max_x = config['scaling']['max_x']
-        self.min_y = config['scaling']['min_y']
-        self.max_y = config['scaling']['max_y']
 
-        # rng
-        self.rng = rng if rng is not None else np.random
-
-        if grid:
-            self._make_LUT()
-            self._localize = self._localize_grid
-        else:
-            self._localize = self._localize_opt_hybrid
-    
-    def _make_LUT(self):
-        # precalculate TOSSIT distances for all possible gridded locations
-        num_TOSSITs = self.TOSSIT_locations.shape[0]
-        x = np.arange(self.min_x-10000, self.max_x+10000, 50)
-        y = np.arange(self.min_y-10000, self.max_y+10000, 50)
-        self.X, self.Y = np.meshgrid(x, y)
-        self.LUT = np.zeros((num_TOSSITs, *self.X.shape))
-        for t in range(num_TOSSITs):
-            self.LUT[t,...] = np.sqrt(((self.TOSSIT_locations[t,0] - self.Y) ** 2) + ((self.TOSSIT_locations[t,1] - self.X) ** 2))
-    
-    def _localize_grid(self, ranges, sensors_idx):
-        ranges = ranges[:,np.newaxis,np.newaxis]
-        sq_err = ((self.LUT[sensors_idx,:] - ranges) ** 2).sum(axis=0)
-
-        return np.min(sq_err), np.asarray([self.Y[sq_err == np.min(sq_err)], self.X[sq_err == np.min(sq_err)]]).squeeze()
-
-    def _localize_opt(self, ranges, sensors_idx):
-        """
-        An iterative localization method based on minimizing the following cost function:
-        
-        (1 / N) * \sum_{i=1}^{N} (||p_{i} - p_{0}||_{2} - r_{i})^{2}.
-        
-        Parameters
-        ----------
-        ranges : array-like of shape M,
-            list of range measurements from source to sensor
-        sensors_idx : array-like of shape M
-            list of sensor indices associated with the provided range measurements
-            
-        Returns
-        -------
-        res.fun : float
-            cost function value
-        res.x : array-like
-            optimized location
-        """
-                
-        # define objective function
-        def obj(x):
-            # calculate l2s between TOSSIT positions and predicted location
-            l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - x[0]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - x[1]) ** 2)
-
-            # return sum squared error between l2s and predicted ranges
-            return (1 / len(ranges))*np.sum((l2.squeeze() - ranges) ** 2)
-
-        # random initial guess
-        x0 = [self.rng.uniform(self.min_y, self.max_y), self.rng.uniform(self.min_x, self.max_x)]
-        
-        # optimize!
-        res = minimize(obj, x0, method='Nelder-Mead', options={'disp': False})
-        
-        return res.fun, res.x
-    
-    def _localize_opt_hybrid(self, ranges, sensors_idx):
-        """
-        Hybrid localization method which choses between slower iterative method
-        and the closed form method presented in doi:10.1017/S0263574710000196.
-        
-        Parameters
-        ----------
-        ranges : array-like of shape M,
-            list of range measurements from source to sensor
-        sensors_idx : array-like of shape M,
-            list of sensor indices associated with the provided range measurements
-            
-        Returns
-        -------
-        loc : array-like
-            optimized location
-        cost : float
-            cost of the localization objective function
-        """
-                
-        # get sensors and save how many
-        p_i = self.TOSSIT_locations.T[:,sensors_idx]
-        N = p_i.shape[1]
-
-        # calculate a, B, c, H
-        a = (p_i * (p_i * p_i).sum(axis=0, keepdims=True) \
-             - (ranges**2 * p_i)).sum(axis=1, keepdims=True) / N
-
-        eye = np.dstack(N*[np.eye(2)])
-        B = ((-2*np.einsum('ij,kj->jik', p_i, p_i)).sum(axis=0) \
-             + (-(np.expand_dims((p_i * p_i).sum(axis=0, keepdims=True), axis=0) * eye) \
-             + np.expand_dims(ranges**2, axis=0) * eye).sum(axis=2)) / N
-
-        c = p_i.sum(axis=1, keepdims=True) / N
-
-        H = (-2 / N)*(np.einsum('ij,kj->jik', p_i, p_i).sum(axis=0)) + (2*c @ c.T)
-        
-        if np.linalg.matrix_rank(H) < 2:
-            cost, loc = self._localize_opt(ranges, sensors_idx)
-            return cost, loc
-        else:
-            # check if approximation holds to make H matrix.
-            # if not, use gradient-based localization
-            f = a + B @ c + 2*c @ c.T @ c
-        
-            q = -np.linalg.inv(H) @ f
-
-            D = B + 2*c @ c.T + (c.T @ c) * np.eye(2)
-            H_hat = D - (q.T @ q)*np.eye(2)
-            
-            dist = math_tools.matrix_similarity(H, H_hat)
-            
-            if dist < self.method_thresh:
-                cost, loc = self._localize_opt(ranges, sensors_idx)
-                return cost, loc
-
-            # calculate cost for closed form method
-            loc = (q + c).squeeze()
-            l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - loc[0]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - loc[1]) ** 2)
-            cost = (1 / len(ranges))*np.sum((l2.squeeze() - ranges) ** 2)
-            return cost, loc 
+        self.multilat = multilat
+        self.multilat.set_map({
+            'TOSSIT_locations' : self.TOSSIT_locations,
+            'min_x' : config['scaling']['min_x'],
+            'max_x' : config['scaling']['max_x'],
+            'min_y' : config['scaling']['min_y'],
+            'max_y' : config['scaling']['max_y'],
+        })
         
     def set_measurements(self, measurements, adaptive=False, adaptive_max=5000, threshold_delta=500):
         """
@@ -897,7 +758,8 @@ class Localizer:
                         if key in memo.keys():
                             loc = memo[key]
                         else:
-                            _, loc = self._localize(self._linear_measurements[range_subcombo], s_subcombo)
+                            _, loc = self.multilat.localize(self._linear_measurements[range_subcombo], s_subcombo)
+                            memo[key] = loc
 
                         r = (set(range_combo) - set(range_subcombo)).pop()
                         s = (set(s_comb) - set(s_subcombo)).pop()
@@ -919,7 +781,6 @@ class Localizer:
             else:
                 return False
 
-    
     def reset(self):
         """
         Reset object between different data
@@ -977,7 +838,7 @@ class Localizer:
                         ranges = self._ranges[list(popped_a)]
                         
                         # calculate localization cost and update best
-                        cost, _ = self._localize(ranges, sensors)
+                        cost, _ = self.multilat.localize(ranges, sensors)
                         if cost < max_err:
                             max_err = cost
                             best_assoc = popped_a
@@ -1027,7 +888,7 @@ class Localizer:
             a = list(a)
             sensors = [self._tuple_idx[idx][0] for idx in a]
             ranges = self._linear_measurements[a]
-            _, loc = self._localize(ranges, sensors)
+            _, loc = self.multilat.localize(ranges, sensors)
             locs.append(loc)
         locs = np.asarray(locs)
         
