@@ -8,7 +8,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
-from whale_gunshot_localization.utils.experimental import Localizer
+from whale_gunshot_localization.utils.experimental import Localizer, MultilaterationOpt, MultilaterationGrid
 
 # parse input arguments
 parser = argparse.ArgumentParser(description="Run Monte Carlo simulations for data association/localization algorithm")
@@ -260,7 +260,7 @@ if __name__ == "__main__":
         rng2 = np.random.default_rng(1524)
 
         # parameters for localizer and data_generator
-        localizer_params = dict(k=4, consistency_thresh=1000, method_thresh=0.95, prune=False, grid=False, rng=rng1)
+        localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=0.95, rng=rng1), consistency_thresh=1000, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
         data_gen_params = dict(num_delete=0, rng=rng2)
 
