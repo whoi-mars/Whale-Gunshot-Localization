@@ -184,7 +184,7 @@ def scan_experimental_data(model, file, chunk_size, overlap_fraction, ordered_se
     CA = experimental.ClipAnalyzer(model, data_params, preprocessor=experimental.l2_standardize, device=device)
 
     # prepare localizer object
-    l = experimental.Localizer(k=4, consistency_thresh=1200, method_thresh=0.95, prune=False, grid=False)
+    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=0.95), consistency_thresh=1200, prune=False)
 
     # scan files
     pointer = 0

@@ -185,7 +185,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
     CA = experimental.ClipAnalyzer(model, data_params, preprocessor=experimental.l2_standardize, device=device)
 
     # prepare localizer object
-    l = experimental.Localizer(k=4, consistency_thresh=1200, method_thresh=0.95, prune=False, grid=False)
+    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=0.95), consistency_thresh=1200, prune=False)
 
     # get starts of chunks to read
     chunk_starts = pd.date_range(start=start, end=end, freq=f"{chunk_size}s")
