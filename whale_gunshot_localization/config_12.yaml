@@ -29,4 +29,4 @@ scaling:
   max_r: 31065.950964
 models:
   checkpoints_directories: "/workspace/data/models"
-  model_dir: "/range_classify"
+  model_dir: "/range_classify_12"
