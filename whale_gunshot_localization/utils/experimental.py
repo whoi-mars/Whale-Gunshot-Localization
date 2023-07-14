@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 import numpy as np
 import torch
 from scipy.signal import resample_poly, find_peaks
-from scipy.optimize import minimize
+from scipy.optimize import least_squares
 import gtsam
 import pandas as pd
 import librosa
@@ -442,15 +442,19 @@ class MultilaterationOpt(MultilaterationBase):
             l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - x[0]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - x[1]) ** 2)
 
             # return sum squared error between l2s and predicted ranges
-            return (1 / len(ranges))*np.sum((l2.squeeze() - ranges) ** 2)
+            # return (1 / len(ranges))*np.sum((l2.squeeze() - ranges.squeeze()) ** 2)
+            return l2.squeeze() - ranges.squeeze()
+
 
         # random initial guess
-        x0 = [self.rng.uniform(self.min_y, self.max_y), self.rng.uniform(self.min_x, self.max_x)]
-        
+        # x0 = [self.rng.uniform(self.min_y, self.max_y), self.rng.uniform(self.min_x, self.max_x)]
+        x0 = [self.rng.uniform(-5000, 5000), self.rng.uniform(-5000, 5000)]
+
         # optimize!
-        res = minimize(obj, x0, method='Nelder-Mead', options={'disp': False})
-        
-        return res.fun, res.x
+        #res = minimize(obj, x0, method='Nelder-Mead', options={'disp': False})
+        res = least_squares(obj, x0)
+
+        return res.cost, res.x
     
     def localize(self, ranges, sensors_idx):
         """
@@ -509,7 +513,7 @@ class MultilaterationOpt(MultilaterationBase):
             # calculate cost for closed form method
             loc = (q + c).squeeze()
             l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - loc[0]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - loc[1]) ** 2)
-            cost = (1 / len(ranges))*np.sum((l2.squeeze() - ranges) ** 2)
+            cost = 0.5*np.sum((l2.squeeze() - ranges) ** 2)
             return cost, loc 
 
 class MultilaterationGrid(MultilaterationBase):
@@ -848,7 +852,7 @@ class Localizer:
 
         return [assoc for assoc in associations if len(assoc) >= 3]
 
-    def associate_and_localize(self, method='clique'):
+    def associate_and_localize(self, method='clique', last_step=True):
         """
         Using the hypergraph constructed in self.set_measurements, perform data association
         and localization.
@@ -857,6 +861,10 @@ class Localizer:
         ----------
         method : string
             can be either 'clique' (doesn't really work right now) or 'partition'
+        last_step : bool
+            whether to apply a simple last step which ensures only one measurement
+            per sensor is included in a given association. this parameter only matters
+            for the partition method.
 
         Returns
         -------
@@ -879,7 +887,8 @@ class Localizer:
         elif method == 'partition':
             HG = hmod.precompute_attributes(self.H)
             associations = hmod.kumar(HG)
-            associations = self._last_step(associations)
+            if last_step:
+                associations = self._last_step(associations)
         else:
             raise ValueError("Method must be either 'clique' or 'partition'")
 
@@ -1108,7 +1117,7 @@ class ClipAnalyzer:
 
 if __name__ == "__main__":
     wr = WAVReader(sensors=config['TOSSIT']['ids'], chunk_size=160)
-    ts = np.datetime64('2022-03-30T00:15:40')
+    ts = np.datetime64('2023-04-05T00:15:40')
     success, files, d = wr.get_audio(ts)
 
     # get files associated with first sensor in ordered_sensors list
