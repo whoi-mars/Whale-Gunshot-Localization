@@ -531,10 +531,8 @@ class SimDataRangeClassifyEvaluateLocalize(data.Dataset):
 
     def __getitem__(self, idx):
 
-        # get data
-        inputs = self.data[idx]
-
         if np.random.choice([0,1]):
+            inputs = self.data[idx]
             target_c = self._from_numpy(np.asarray([1]))
             target_r = self._from_numpy(self.range_labels[idx])
             x_target = self._from_numpy(self.labels[[idx],1])
@@ -552,7 +550,8 @@ class SimDataRangeClassifyEvaluateLocalize(data.Dataset):
 
         # transform
         if self.transform is not None:
-            inputs = self.transform(inputs)
+            for i in range(self.num_TOSSITs):
+                inputs[i,...] = self.transform(inputs[i,...])
 
         # squeeze
         if self.squeeze:
