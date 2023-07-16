@@ -3,10 +3,12 @@ import argparse
 import itertools
 import math
 from multiprocessing import Pool
+import pickle
 
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.linear_model import LinearRegression
 from tqdm import tqdm
 import pandas as pd
@@ -24,20 +26,13 @@ parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
 args = parser.parse_args()
 
-def to_positive_theta(theta):
-    if theta >= 0:
-        return theta
-    else:
-        return 360 - abs(theta)
-
 def get_bearing(x_ends, y_ends):
+    return math.atan2(y_ends[1] - y_ends[0], x_ends[1] - x_ends[0]) * (180 / math.pi)
 
-    theta = math.atan2(y_ends[1] - y_ends[0], x_ends[1] - x_ends[0]) * (180 / math.pi)
-    if theta >= 0:
-        return theta
-    else:
-        return 360 - abs(theta)
-
+def bearing_error(bearing1, bearing2):
+    theta = np.abs(bearing1 - bearing2)
+    theta[theta > 180] = 360 - theta[theta > 180]
+    return theta
 
 def plot_localization(source_locs, locs_est=None, title='', buffer=6000): 
     
@@ -127,7 +122,7 @@ def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000)
     time_stamps = time_stamps[np.newaxis,:]
     for t in range(TOSSIT_locations.shape[0]):
         offset = rng.uniform(low=0, high=max_channel_offset)
-        time_stamps = np.concatenate((time_stamps, time_stamps[[0],:] + offset))    
+        time_stamps = np.concatenate((time_stamps, time_stamps[[0],:] + offset), axis=0)    
     
     # split measurements
     measurements_list = []
@@ -156,7 +151,6 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
     l = Localizer(**localizer_params)
 
     # calculate bearing
-    theta_orig = to_positive_theta(math.atan2((-source_locs[-1,0]) - (-source_locs[0,0]), source_locs[-1,1] - source_locs[0,1]) * (180 / math.pi))
     theta = get_bearing([source_locs[0,1], source_locs[-1,1]], [-source_locs[0,0], -source_locs[-1,0]])
 
     # build hypergraph
@@ -191,63 +185,63 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
         # get theta_hat
         x_ends = np.asarray([x[0], x[-1]])
         y_ends = reg.predict(x_ends)
-        theta_hat_orig = to_positive_theta(math.atan2(y_ends[1] - y_ends[0], x_ends[1] - x_ends[0]) * (180 / math.pi))
         theta_hat = get_bearing(x_ends.squeeze(), y_ends)
 
         return path_detected, theta, theta_hat
     return path_detected, float('nan'), float('nan')
 
-def monte_carlo_sim(n, var_list, localizer_params, set_measurement_params, data_gen_params):
+def monte_carlo_sim(n, max_time_offset_list, var_list, localizer_params, set_measurement_params, data_gen_params):
     
     assert data_gen_params['beam_width'] == 0, "beam width must be 0 for monte carlo simulations"
 
-    columns = ["k", "consistency_thresh", "method_thresh", "prune", "measurement_variance", "success_rate", "theta_error", "theta_error_std"]
+    columns = ["k", "consistency_thresh", "method_thresh", "prune", "max_time_offset", "measurement_variance", "success_rate", "theta_error"]
     df = pd.DataFrame(columns=columns)
 
-    for var in var_list:
-        if args.background:
-            print(f'working on -- var: {var} km...', flush=True)
-        
-        # keep track of theta
-        theta_list = []
+    for max_time_offset in max_time_offset_list:
+        for var in var_list:
+            if args.background:
+                print(f'working on -- max_time_offset: {max_time_offset}, var: {var} km...', flush=True)
+            
+            # keep track of theta
+            theta_list = []
 
-        # keep track of theta_hat
-        theta_hat_list = []
+            # keep track of theta_hat
+            theta_hat_list = []
 
-        # keep track of successes
-        success_list = []
+            # keep track of successes
+            success_list = []
 
-        # generate data
-        source_locs_list = []
-        measurements_set_list = []
-        for _ in range(n):
             # generate data
-            source_locs, measurements_list = generate_trajectory(measurement_stats=(0, var), **data_gen_params)
-            source_locs_list.append(source_locs)
-            measurements_set_list.append(measurements_list)
-        
-        with Pool(processes=100) as pool:
-            results = pool.starmap(monte_carlo, tqdm(zip(source_locs_list, measurements_set_list, itertools.repeat(localizer_params)), total=n, disable=args.background))
+            source_locs_list = []
+            measurements_set_list = []
+            for _ in range(n):
+                # generate data
+                source_locs, measurements_list = generate_trajectory(measurement_stats=(0, var), max_channel_offset=max_time_offset, **data_gen_params)
+                source_locs_list.append(source_locs)
+                measurements_set_list.append(measurements_list)
+            
+            with Pool(processes=100) as pool:
+                results = pool.starmap(monte_carlo, tqdm(zip(source_locs_list, measurements_set_list, itertools.repeat(localizer_params)), total=n, disable=args.background, postfix={'max_time_offset' : max_time_offset, 'var' : var}))
 
-        # save values
-        for result_set in results:
-            success_list.append(result_set[0])
-            theta_list.append(result_set[1])
-            theta_hat_list.append(result_set[2])
-        success_list = np.asarray(success_list)
-        theta_list = np.asarray(theta_list)
-        theta_hat_list = np.asarray(theta_hat_list)
-        
-        df = pd.concat([df, pd.DataFrame({
-            "k" : [localizer_params["k"]],
-            "consistency_thresh" : [localizer_params["consistency_thresh"]],
-            "method_thresh" : [localizer_params["multilat"].method_thresh],
-            "prune" : [localizer_params["prune"]],
-            "measurement_variance" : [var],
-            "success_rate" : [np.mean(success_list)],
-            "theta_error" : [np.nanmean(np.abs(theta_list - theta_hat_list))],
-            "theta_error_std" : [np.nanstd(np.abs(theta_list - theta_hat_list))],
-        })])
+            # save values
+            for result_set in results:
+                success_list.append(result_set[0])
+                theta_list.append(result_set[1])
+                theta_hat_list.append(result_set[2])
+            success_list = np.asarray(success_list)
+            theta_list = np.asarray(theta_list)
+            theta_hat_list = np.asarray(theta_hat_list)
+            
+            df = pd.concat([df, pd.DataFrame({
+                "k" : [localizer_params["k"] for _ in range(n)],
+                "consistency_thresh" : [localizer_params["consistency_thresh"] for _ in range(n)],
+                "method_thresh" : [localizer_params["multilat"].method_thresh for _ in range(n)],
+                "prune" : [localizer_params["prune"] for _ in range(n)],
+                "max_time_offset" : [max_time_offset for _ in range(n)],
+                "measurement_variance" : [var for _ in range(n)],
+                "success_rate" : success_list.tolist(),
+                "theta_error" : bearing_error(theta_list, theta_hat_list).tolist(),
+            })])
 
     return df
 
@@ -255,6 +249,11 @@ if __name__ == "__main__":
 
     # path for results CSV
     path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder", "path_finder_sim_results.csv")
+    fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder")
+
+    ##########################################
+    #          simulate/load results         #
+    ##########################################
 
     if args.simulate:
         
@@ -265,20 +264,15 @@ if __name__ == "__main__":
         # parameters
         localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=0.95, rng=rng1), consistency_thresh=1000, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
-        data_gen_params = dict(rng=None, num_points=8, beam_width=0, timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, max_channel_offset=40)
+        data_gen_params = dict(rng=rng2, num_points=8, beam_width=0, timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2)
 
-        df = monte_carlo_sim(n=1,
-                             var_list=[10, 100, 1000, 10000, 100000, 1000000], 
+        df = monte_carlo_sim(n=150,
+                             max_time_offset_list=[0, 10],
+                             var_list=[1e1, 1e2, 1e3, 1e4, 1e5, 1e6], 
                              localizer_params=localizer_params,
                              set_measurement_params=set_measurement_params,
                              data_gen_params=data_gen_params)
-
-        # append results if CSV exists
-        if os.path.exists(path):
-            df.to_csv(path, mode='a', index=False, header=False)
-            df = pd.read_csv(path)
-        else:
-            df.to_csv(path, index=False)
+        df.to_csv(path, index=False)
     else:
         # check that we have simulated resuts in a CSV
         if os.path.exists(path):
@@ -286,33 +280,75 @@ if __name__ == "__main__":
         else:
             raise RuntimeError(f"'{path}' does not exist")
 
+    ##########################################
+    #               make plots               #
+    ##########################################
+
     # matplotlib settings
     matplotlib.rcParams.update({'font.size' : 16})
 
-    # set of variances tested
+    # # set of variances tested
     var_list = sorted(list(set(df['measurement_variance'])))
+    # max_time_offset_list = sorted(list(set(df['max_time_offset'])))
 
-    # get values to plot
-    theta_error = []
-    theta_error_std = []
-    for var in var_list:
-        df_plot = df[df['measurement_variance'] == var]
-        theta_error.extend(df_plot['theta_error'].tolist())
-        theta_error_std.extend(df_plot['theta_error_std'].tolist())
-
+    # # get values to plot
+    # data = dict()
+    # for max_time_offset in max_time_offset_list:
+    #     theta_error = []
+    #     theta_error_std = []
+    #     for var in var_list:
+    #         df_plot = df[(df['measurement_variance'] == var) & (df['max_time_offset'] == max_time_offset)]
+    #         theta_error.extend(df_plot['theta_error'].tolist())
+    #         theta_error_std.extend(df_plot['theta_error_std'].tolist())
+    #     data[str(max_time_offset)] = [theta_error, theta_error_std]
     # get figs and axes
     figs = [plt.figure() for _ in range(1)]
     axs = [fig.gca() for fig in figs]
 
+    # with open(os.path.join(fig_path, 'data.pkl'), 'rb') as f:
+    #     data = pickle.load(f) 
+
     # bearing error
-    axs[0].errorbar([str(int(var / 1e6)) if (var / 1e6).is_integer() else str(var / 1e6) for var in var_list], theta_error, yerr=theta_error_std, capsize=10, fmt='-o', markersize=8, linewidth=3, elinewidth=3, capthick=3)
-    axs[0].set_xlabel("Range Measurement Variance [km$^{2}$]")
+    # x = np.arange(len(var_list))
+    # width = 0.25
+    # multiplier = 0
+    sns.boxplot(x=df['measurement_variance'], 
+                y=df['theta_error'], 
+                hue=df['max_time_offset'], 
+                ax=axs[0], 
+                showfliers=False,
+                showmeans=True, 
+                linewidth=1, 
+                meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},)
+    axs[0].set_xticks(np.arange(len(var_list)), [str(int(var)) if var.is_integer() else str(var) for var in var_list])
+    axs[0].set_xlabel("Range Measurement Variance [m$^{2}$]")
     axs[0].set_ylabel("Absolute Theta Error [$^{\circ}$]")
     axs[0].set_title("Bearing Error")
+    axs[0].legend(title='max channel offset')
+    axs[0].set_axisbelow(True)
+
+    # offset = width * multiplier
+    # print([bearing_error(measurement[0], measurement[1]) for a, measurement in data.items()])
+    # axs[0].boxplot([bearing_error(measurement[0], measurement[1]) for a, measurement in data.items()], showfliers=False)
+    # rects = axs[0].bar(x + offset, measurement[0], width, label=attribute + " s", yerr=measurement[1], capsize=10)
+    # axs[0].bar_label(rects, padding=3)
+    # multiplier += 1
+    
+    # print(data['10000.0_10'][0])
+    # all_data = [np.random.normal(0, std, 100) for std in range(6, 10)]
+
+    # print(data['100000.0_0'][0])
+    # print(data['100000.0_0'][1])
+    # print(bearing_error(data['100000.0_0'][0], data['100000.0_0'][1]))
+    # axs[0].boxplot(bearing_error(data['1000000.0_0'][0], data['1000000.0_0'][1]), showfliers=False, showmeans=True)
+
+    # axs[0].legend(loc='upper left')
+    # axs[0].set_xlabel("Range Measurement Variance [m$^{2}$]")
+    # axs[0].set_ylabel("Absolute Theta Error [$^{\circ}$]")
+    # axs[0].set_title("Bearing Error")
 
     for ax in axs:
         ax.grid()
 
     if args.save_figs:
-        fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder")
         figs[0].savefig(os.path.join(fig_path, "theta_error.png"))
