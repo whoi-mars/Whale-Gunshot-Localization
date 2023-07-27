@@ -1,3 +1,7 @@
+"""
+Script to scan all files and plot corresponding binned detections together.
+"""
+
 import os
 import glob
 import argparse
@@ -8,6 +12,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from pathlib import Path
 
 from whale_gunshot_localization.models.tcn_archs import TCNRangeAndClassify
 from whale_gunshot_localization.utils.experimental import ClipAnalyzer, l2_standardize, sort_wav_chronological
@@ -29,6 +34,11 @@ args = parser.parse_args()
 
 if __name__ == "__main__":
     
+    # results paths
+    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "scan_results.csv")
+    img_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "detection_viz")
+    Path(img_path).mkdir(exist_ok=True)
+
     if args.scan:
         # get device
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -74,10 +84,6 @@ if __name__ == "__main__":
                           device=device,
                           background=args.background)
                 print()
-    
-    # results paths
-    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "scan_results.csv")
-    img_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results")
 
     if os.path.exists(csv_path):
         df = pd.read_csv(csv_path)
