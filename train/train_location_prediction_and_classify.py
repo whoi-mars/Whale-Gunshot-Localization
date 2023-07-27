@@ -273,12 +273,12 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                 running_corrects += ((F.softmax(outputs[:,1:].detach(),dim=1)[:,1].squeeze() >= 0.5) == targets_c.detach().squeeze()).sum()
             
                 if (not args.no_wb) and phase == 'train':
-                    step_metrics = {"train/train_loss" : loss,
-                                    "train/class_loss" : c_loss,
-                                    "train/range_loss" : r_loss,
+                    step_metrics = {"train/train_loss" : loss.item(),
+                                    "train/class_loss" : c_loss.item(),
+                                    "train/range_loss" : r_loss.item(),
                                     "train/epoch" : (step + 1 + (n_steps_per_epoch * epoch)) / n_steps_per_epoch,
-                                    "train/LVr" : criterion.log_vars[0],
-                                    "train/LVc" : criterion.log_vars[1],
+                                    "train/LVr" : criterion.log_vars[0].detach(),
+                                    "train/LVc" : criterion.log_vars[1].detach(),
                                     "train/r_sq_error" : r_mse.mean(),}
                     if step + 1 < n_steps_per_epoch:
                         wandb.log(step_metrics)

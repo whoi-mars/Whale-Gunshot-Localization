@@ -1,3 +1,7 @@
+"""
+Script to collect noise to store in H5 file for training and in a MAT file for simulated data geneation.
+"""
+
 import os
 import argparse
 
@@ -14,7 +18,7 @@ from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 parser = argparse.ArgumentParser(description="Collect examples randomly from experimental data to serve as noise-only examples for training.")
 parser.add_argument('-n', '--number', type=int, default=10000,
                     help='number of examples to collect (default: 10000')
-parser.add_argument('-fs', '--sample_rate', type=float, default=12000,
+parser.add_argument('-fs', '--sample_rate', type=int, default=12000,
                     help='desired sample rate at which to save the collected examples (default: 12000 Hz)')
 parser.add_argument('-T', '--duration', type=float, default=6,
                     help='desired signal duration for each collected example (default: 6 s)')
@@ -104,15 +108,20 @@ def collect_noise(n, fs_target, T_target):
         
         # downsample and save
         wav = resample_poly(wav, fs_target, f_samplerate)
+        
         X[i,:] = wav
-
-    with h5py.File(os.path.join(config['dataset']['data_directory'], f"{args.save_name}.h5"), "w") as f:
-        f.create_dataset('data', data=X, shape=X.shape, chunks=(1, X.shape[1]))
-        f.create_dataset('fs', data=args.sample_rate, shape=(1,)) 
 
     # save as MAT file
     mdict = {u'noise_from_data': X.T, u'fs': float(fs_target)}
     hdf5storage.savemat(os.path.join(config['dataset']['data_directory'], f"{args.save_name}.mat"), mdict, format="7.3")
+
+    # mean-center and L2 norm for h5 noise
+    X = X - X.mean(axis=1, keepdims=True)
+    X = X / np.sqrt(np.sum(X ** 2, axis=1, keepdims=True))
+
+    with h5py.File(os.path.join(config['dataset']['data_directory'], f"{args.save_name}.h5"), "w") as f:
+        f.create_dataset('data', data=X, shape=X.shape, chunks=(1, X.shape[1]))
+        f.create_dataset('fs', data=args.sample_rate, shape=(1,)) 
 
 if __name__ == "__main__":
 

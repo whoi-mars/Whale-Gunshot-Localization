@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 import numpy as np
 import torch
 from scipy.signal import resample_poly, find_peaks
-from scipy.optimize import minimize
+from scipy.optimize import least_squares
 import gtsam
 import pandas as pd
 import librosa
@@ -193,6 +193,38 @@ def get_wav_timestamp(wav_file, timestamp):
     # get time of timestamp
     return start_time + np.timedelta64(timestamp, 'ms')
 
+def load_wav(path, start, duration):
+    """
+    Grab mean-centered and downsampled sectino of audio from file.
+
+    Parameters
+    ----------
+    path : str
+        path to WAV file
+    start : float
+        timestamp (sec.) to start the extracted clip from
+    duration : float
+        number of seconds after 'start' to extract
+
+    Returns
+    -------
+    : array-like
+        extracted audio signal
+    """
+    
+    # load audio
+    file_samplerate = librosa.get_samplerate(path=path)
+    y, _ = librosa.load(path, sr=file_samplerate, offset=start, duration=duration)
+    
+    # resample if necessary
+    if config['signal']['fs'] != file_samplerate:
+        y = resample_poly(y, config['signal']['fs'], file_samplerate)
+    
+    # mean center
+    y = y - y.mean()
+    
+    return y
+
 class WAVReader:
     """
     Class to read a chunk of audio starting as a particular timestamp 
@@ -331,35 +363,18 @@ class WAVReader:
         
         return True, np.asarray(files), np.asarray(data)
 
-class Localizer:
+#######################################################################################################
+
+class MultilaterationBase:
     """
-    Class to perform data association and range-based localization using 
-    multiple range measurements from multiple sensors.
-    
+    Base class for multilateration algorithms.
+
     ...
-    
+
     Attributes
     ----------
     TOSSIT_locations : array-like of shape N X 2
         locations of the acoustic sensors or the form [y, x]
-    measurements : List[array-like]
-        each sublist contains range measurements associated with a particular sensor
-    H : hypernetx.classes.hypergraph.Hypergraph
-        hypergraph object
-    k : int
-        number of measurements to group when checking for measurement group consistency
-    consistency_thresh : float
-        threshold for distance from range to location to determine which measurements groups
-        are self-consistent
-    method_thresh : float in [0, 1]
-        threshold to determine if approximation of H matrix from doi:10.1017/S0263574710000196
-        is sufficient and determines whether to use closed-form or gradient-based localization approch
-    prune : bool
-        whether to prune measurement groups based on lack of range measurement intersection
-    grid : bool
-        whether to use grid method of localization rather than the iterative optimization approach
-    rng : numpy.random._generator.Generator
-        optional RNG object
     min_x : float
         minimum x coordinate used to generate simulated data for detection/range estimation network training.
         used to generate an initial guess for iterative optimization method.
@@ -373,86 +388,66 @@ class Localizer:
         maximum y coordinate used to generate simulated data for detection/range estimation network training.
         used to generate an initial guess for iterative optimization method.
     """
+
+    def __init__(self):
+        pass
     
-    def __init__(self, k, consistency_thresh=1000, method_thresh=0.95, prune=False, grid=False, rng=None):
+    def set_map(self, geo_params):
         """
-        Construct attributes
-        
+        To make sure we inherit the necessary geographic
+        parameters and set them as attributes.
+
         Parameters
         ----------
-        k : int
-            number of measurements to group when checking for measurement group consistency
-        consistency_thresh : float
-            threshold for distance from range to location to determine which measurements groups
-            are self-consistent
+        geo_params : dict
+            dictionary containing geographic parameters required for
+            any multilateration algorithm
+        """
+        
+        # make sure we can inherit necessary attributes
+        # from localizer object
+        required = ["TOSSIT_locations", "min_x", "max_x", "min_y", "max_y"]
+        assert all(param in geo_params.keys() for param in required)
+        
+        # set attributes
+        for kv in geo_params.items():
+            setattr(self, kv[0], kv[1])
+
+class MultilaterationOpt(MultilaterationBase):
+    """
+    A least squares approach to multilateration
+
+    ...
+
+    Attributes
+    ----------
+    rng : numpy.random._generator.Generator
+        optional RNG object
+    method_thresh : float in [0, 1]
+        threshold to determine if approximation of H matrix from doi:10.1017/S0263574710000196
+        is sufficient and determines whether to use closed-form or gradient-based localization approch
+    """
+
+    def __init__(self, method_thresh=0.95, rng=None):
+        """
+        Construct attributes.
+
+        Parameters
+        ----------
+        rng : numpy.random._generator.Generator
+            optional RNG object
         method_thresh : float in [0, 1]
             threshold to determine if approximation of H matrix from doi:10.1017/S0263574710000196
             is sufficient and determines whether to use closed-form or gradient-based localization approch
-        prune : bool
-            whether to prune measurement groups based on lack of range measurement intersection
-        grid : bool
-            whether to use grid method of localization rather than the iterative optimization approach
-        rng : numpy.random._generator.Generator
-            optional RNG object
         """
-        
-        # load TOSSIT locations
-        self.TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-        
-        # initialize empty measurements and hypergraph
-        self.measurements = None
-        self.formatted_linear_idx = None
-        self.H = None
-        self._linear_measurements = None
-        self._tuple_idx = None
-        self._sensors = None
-        self._ranges = None
-        
-        # uniformity constant for hypergraph
-        if k > 3 and k <= self.TOSSIT_locations.shape[0]:
-            self.k = k
-        else:
-            raise ValueError(f"k must be > 3 and < {self.TOSSIT_locations.shape[0]}.")
-        
-        # thresholds
-        self.consistency_thresh = consistency_thresh
+
+        # threshold used to decide if we can use the closed form approximation
         self.method_thresh = method_thresh
-        
-        # prune sets of k measurements based on pairwise intersection check
-        self.prune = prune
-        
-        # get bounds of considered grid
-        self.min_x = config['scaling']['min_x']
-        self.max_x = config['scaling']['max_x']
-        self.min_y = config['scaling']['min_y']
-        self.max_y = config['scaling']['max_y']
 
         # rng
-        self.rng = rng if rng is not None else np.random
-
-        if grid:
-            self._make_LUT()
-            self._localize = self._localize_grid
-        else:
-            self._localize = self._localize_opt_hybrid
+        self.rng = rng if rng is not None else np.random.default_rng(np.random.randint(1,1000))
     
-    def _make_LUT(self):
-        # precalculate TOSSIT distances for all possible gridded locations
-        num_TOSSITs = self.TOSSIT_locations.shape[0]
-        x = np.arange(self.min_x-10000, self.max_x+10000, 50)
-        y = np.arange(self.min_y-10000, self.max_y+10000, 50)
-        self.X, self.Y = np.meshgrid(x, y)
-        self.LUT = np.zeros((num_TOSSITs, *self.X.shape))
-        for t in range(num_TOSSITs):
-            self.LUT[t,...] = np.sqrt(((self.TOSSIT_locations[t,0] - self.Y) ** 2) + ((self.TOSSIT_locations[t,1] - self.X) ** 2))
-    
-    def _localize_grid(self, ranges, sensors_idx):
-        ranges = ranges[:,np.newaxis,np.newaxis]
-        sq_err = ((self.LUT[sensors_idx,:] - ranges) ** 2).sum(axis=0)
-
-        return np.min(sq_err), np.asarray([self.Y[sq_err == np.min(sq_err)], self.X[sq_err == np.min(sq_err)]]).squeeze()
-
-    def _localize_opt(self, ranges, sensors_idx):
+    def _opt(self, ranges, sensors_idx):
         """
         An iterative localization method based on minimizing the following cost function:
         
@@ -479,17 +474,21 @@ class Localizer:
             l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - x[0]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - x[1]) ** 2)
 
             # return sum squared error between l2s and predicted ranges
-            return (1 / len(ranges))*np.sum((l2.squeeze() - ranges) ** 2)
+            # return (1 / len(ranges))*np.sum((l2.squeeze() - ranges.squeeze()) ** 2)
+            return l2.squeeze() - ranges.squeeze()
+
 
         # random initial guess
-        x0 = [self.rng.uniform(self.min_y, self.max_y), self.rng.uniform(self.min_x, self.max_x)]
-        
+        # x0 = [self.rng.uniform(self.min_y, self.max_y), self.rng.uniform(self.min_x, self.max_x)]
+        x0 = [self.rng.uniform(-5000, 5000), self.rng.uniform(-5000, 5000)]
+
         # optimize!
-        res = minimize(obj, x0, method='Nelder-Mead', options={'disp': False})
-        
-        return res.fun, res.x
+        #res = minimize(obj, x0, method='Nelder-Mead', options={'disp': False})
+        res = least_squares(obj, x0)
+
+        return res.cost, res.x
     
-    def _localize_opt_hybrid(self, ranges, sensors_idx):
+    def localize(self, ranges, sensors_idx):
         """
         Hybrid localization method which choses between slower iterative method
         and the closed form method presented in doi:10.1017/S0263574710000196.
@@ -503,10 +502,8 @@ class Localizer:
             
         Returns
         -------
-        loc : array-like
+        array-like
             optimized location
-        cost : float
-            cost of the localization objective function
         """
                 
         # get sensors and save how many
@@ -527,7 +524,7 @@ class Localizer:
         H = (-2 / N)*(np.einsum('ij,kj->jik', p_i, p_i).sum(axis=0)) + (2*c @ c.T)
         
         if np.linalg.matrix_rank(H) < 2:
-            cost, loc = self._localize_opt(ranges, sensors_idx)
+            cost, loc = self._opt(ranges, sensors_idx)
             return cost, loc
         else:
             # check if approximation holds to make H matrix.
@@ -542,14 +539,153 @@ class Localizer:
             dist = math_tools.matrix_similarity(H, H_hat)
             
             if dist < self.method_thresh:
-                cost, loc = self._localize_opt(ranges, sensors_idx)
+                cost, loc = self._opt(ranges, sensors_idx)
                 return cost, loc
 
             # calculate cost for closed form method
             loc = (q + c).squeeze()
             l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - loc[0]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - loc[1]) ** 2)
-            cost = (1 / len(ranges))*np.sum((l2.squeeze() - ranges) ** 2)
+            cost = 0.5*np.sum((l2.squeeze() - ranges) ** 2)
             return cost, loc 
+
+class MultilaterationGrid(MultilaterationBase):
+    """
+    Grid-based multilateration.
+
+    ...
+
+    Attributes
+    ----------
+    rng : numpy.random._generator.Generator
+        optional RNG object
+    X : array-like
+        X meshgrid of locations
+    Y : array-like
+        Y meshgrid of locations
+    LUT : array-like
+        look up table of ranges from each location to each TOSSIT
+    """
+
+    def __init__(self, rng=None):
+        """
+        Construct attributes.
+
+        Parameters
+        ----------
+        rng : numpy.random._generator.Generator
+            optional RNG object
+        """
+        
+        # rng
+        self.rng = rng if rng is not None else np.random.default_rng(np.random.randint(1,1000))
+        
+        # track when we've made LUT
+        self.LUT_exists = False
+    
+    def _make_LUT(self):
+        """
+        Construct LUT of ranges from each TOSSIT
+        """
+
+        # make locations meshgrid
+        num_TOSSITs = self.TOSSIT_locations.shape[0]
+        x = np.arange(self.min_x-10000, self.max_x+10000, 50)
+        y = np.arange(self.min_y-10000, self.max_y+10000, 50)
+        self.X, self.Y = np.meshgrid(x, y)
+
+        # create LUT
+        self.LUT = np.zeros((num_TOSSITs, *self.X.shape))
+        for t in range(num_TOSSITs):
+            self.LUT[t,...] = np.sqrt(((self.TOSSIT_locations[t,0] - self.Y) ** 2) + ((self.TOSSIT_locations[t,1] - self.X) ** 2))
+    
+    def localize(self, ranges, sensors_idx):
+
+        # check if we need to make LUT
+        if not self.LUT_exists:
+            self._make_LUT()
+            self.LUT_exists = True
+
+        # calculate square error of measured ranges and ranges of each location
+        ranges = ranges[:,np.newaxis,np.newaxis]
+        sq_err = ((self.LUT[sensors_idx,:] - ranges) ** 2).sum(axis=0)
+
+        return np.min(sq_err), np.asarray([self.Y[sq_err == np.min(sq_err)], self.X[sq_err == np.min(sq_err)]]).squeeze()
+
+class Localizer:
+    """
+    Class to perform data association and range-based localization using 
+    multiple range measurements from multiple sensors.
+    
+    ...
+    
+    Attributes
+    ----------
+    TOSSIT_locations : array-like of shape N X 2
+        locations of the acoustic sensors or the form [y, x]
+    measurements : List[array-like]
+        each sublist contains range measurements associated with a particular sensor
+    H : hypernetx.classes.hypergraph.Hypergraph
+        hypergraph object
+    k : int
+        number of measurements to group when checking for measurement group consistency
+    consistency_thresh : float
+        threshold for distance from range to location to determine which measurements groups
+        are self-consistent
+    prune : bool
+        whether to prune measurement groups based on lack of range measurement intersection
+    multilat : object
+        Python object used to perform multilateration
+    """
+    
+    def __init__(self, k, multilat, consistency_thresh=1000, prune=False):
+        """
+        Construct attributes
+        
+        Parameters
+        ----------
+        k : int
+            number of measurements to group when checking for measurement group consistency
+        multilat : object
+            Python object used to perform multilateration
+        consistency_thresh : float
+            threshold for distance from range to location to determine which measurements groups
+            are self-consistent
+        prune : bool
+            whether to prune measurement groups based on lack of range measurement intersection
+        """
+        
+        # load TOSSIT locations
+        self.TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
+        
+        # initialize empty measurements and hypergraph
+        self.measurements = None
+        self.formatted_linear_idx = None
+        self.H = None
+        self._linear_measurements = None
+        self._tuple_idx = None
+        self._sensors = None
+        self._ranges = None
+        
+        # uniformity constant for hypergraph
+        if k > 3 and k <= self.TOSSIT_locations.shape[0]:
+            self.k = k
+        else:
+            raise ValueError(f"k must be > 3 and < {self.TOSSIT_locations.shape[0]}.")
+        
+        # thresholds
+        self.consistency_thresh = consistency_thresh
+        
+        # prune sets of k measurements based on pairwise intersection check
+        self.prune = prune
+
+        self.multilat = multilat
+        self.multilat.set_map({
+            'TOSSIT_locations' : self.TOSSIT_locations,
+            'min_x' : config['scaling']['min_x'],
+            'max_x' : config['scaling']['max_x'],
+            'min_y' : config['scaling']['min_y'],
+            'max_y' : config['scaling']['max_y'],
+        })
         
     def set_measurements(self, measurements, adaptive=False, adaptive_max=5000, threshold_delta=500):
         """
@@ -658,7 +794,8 @@ class Localizer:
                         if key in memo.keys():
                             loc = memo[key]
                         else:
-                            _, loc = self._localize(self._linear_measurements[range_subcombo], s_subcombo)
+                            _, loc = self.multilat.localize(self._linear_measurements[range_subcombo], s_subcombo)
+                            memo[key] = loc
 
                         r = (set(range_combo) - set(range_subcombo)).pop()
                         s = (set(s_comb) - set(s_subcombo)).pop()
@@ -680,7 +817,6 @@ class Localizer:
             else:
                 return False
 
-    
     def reset(self):
         """
         Reset object between different data
@@ -738,7 +874,7 @@ class Localizer:
                         ranges = self._ranges[list(popped_a)]
                         
                         # calculate localization cost and update best
-                        cost, _ = self._localize(ranges, sensors)
+                        cost, _ = self.multilat.localize(ranges, sensors)
                         if cost < max_err:
                             max_err = cost
                             best_assoc = popped_a
@@ -748,7 +884,7 @@ class Localizer:
 
         return [assoc for assoc in associations if len(assoc) >= 3]
 
-    def associate_and_localize(self, method='clique'):
+    def associate_and_localize(self, method='clique', last_step=True):
         """
         Using the hypergraph constructed in self.set_measurements, perform data association
         and localization.
@@ -757,6 +893,10 @@ class Localizer:
         ----------
         method : string
             can be either 'clique' (doesn't really work right now) or 'partition'
+        last_step : bool
+            whether to apply a simple last step which ensures only one measurement
+            per sensor is included in a given association. this parameter only matters
+            for the partition method.
 
         Returns
         -------
@@ -779,7 +919,8 @@ class Localizer:
         elif method == 'partition':
             HG = hmod.precompute_attributes(self.H)
             associations = hmod.kumar(HG)
-            associations = self._last_step(associations)
+            if last_step:
+                associations = self._last_step(associations)
         else:
             raise ValueError("Method must be either 'clique' or 'partition'")
 
@@ -788,11 +929,13 @@ class Localizer:
             a = list(a)
             sensors = [self._tuple_idx[idx][0] for idx in a]
             ranges = self._linear_measurements[a]
-            _, loc = self._localize(ranges, sensors)
+            _, loc = self.multilat.localize(ranges, sensors)
             locs.append(loc)
         locs = np.asarray(locs)
         
         return associations, locs
+
+#######################################################################################################
 
 def l2_standardize(examples, mu_list, std_list):
     """
@@ -995,7 +1138,7 @@ class ClipAnalyzer:
         collated_batch = self._collate_samples(clips)
 
         # preprocessing
-        preprocessed_batch = self.preprocessor(collated_batch, self.mu_list, self.std_list).to(self.device) # self._preprocess_batch(collated_batch).to(self.device)
+        preprocessed_batch = self.preprocessor(collated_batch, self.mu_list, self.std_list).to(self.device)
 
         # run through model
         with torch.set_grad_enabled(False):
@@ -1006,7 +1149,7 @@ class ClipAnalyzer:
 
 if __name__ == "__main__":
     wr = WAVReader(sensors=config['TOSSIT']['ids'], chunk_size=160)
-    ts = np.datetime64('2022-03-30T00:15:40')
+    ts = np.datetime64('2023-04-05T00:15:40')
     success, files, d = wr.get_audio(ts)
 
     # get files associated with first sensor in ordered_sensors list

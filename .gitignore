@@ -18,4 +18,5 @@ wandb/
 *.csv
 !scripts/results/*.csv
 !matlab/*.csv
+!experiments/results/*/*.csv
 train_logs/

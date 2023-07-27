@@ -1,3 +1,7 @@
+"""
+Script to scan multiple sensors of experimental data.
+"""
+
 import os
 import glob
 import yaml
@@ -7,6 +11,7 @@ import argparse
 import warnings
 import sys
 import datetime
+from collections import Counter
 
 from tqdm import tqdm
 import librosa
@@ -16,6 +21,7 @@ import pandas as pd
 from scipy import signal
 import matplotlib.pyplot as plt
 from PIL import Image
+from pathlib import Path
 
 from whale_gunshot_localization.models.tcn_archs import TCNRangeAndClassify
 import whale_gunshot_localization.utils.experimental as experimental
@@ -146,6 +152,9 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
         silence the progress bar
     """
     
+    # set up results directory
+    Path(os.path.join(PROJECT_ROOT_DIR, "scripts", "results")).mkdir(exist_ok=True)
+
     # get files associated with first sensor in ordered_sensors list
     wav_files = []
     for s in ordered_sensors:
@@ -185,82 +194,90 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
     CA = experimental.ClipAnalyzer(model, data_params, preprocessor=experimental.l2_standardize, device=device)
 
     # prepare localizer object
-    l = experimental.Localizer(k=4, consistency_thresh=1200, method_thresh=0.95, prune=False, grid=False)
+    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=float('inf')), consistency_thresh=1200, prune=False)
 
-    # get starts of chunks to read
+    # get starts of chunks to read and total days
     chunk_starts = pd.date_range(start=start, end=end, freq=f"{chunk_size}s")
     chunk_starts = chunk_starts[chunk_starts < (end - datetime.timedelta(seconds=chunk_size))]
-    chunks_per_day = datetime.timedelta(days=1) / datetime.timedelta(seconds=chunk_size)
     total_days = (end - start) / datetime.timedelta(days=1)
+
+    # get count of chunks which start on each day
+    day_counts = Counter([date.date() for date in chunk_starts])
 
     # scan files
     day_counter = 1
-    with tqdm(total=chunks_per_day-1, disable=background) as pbar:
+    curr_date = chunk_starts[0].date()
+    with tqdm(total=day_counts[curr_date], disable=background) as pbar:
         for i, start_time in enumerate(chunk_starts):
 
-            if (i % chunks_per_day == 0):
+            # if we are on a new day, reset tqdm bar
+            if start_time.date() != curr_date:
+                curr_date = start_time.date()
                 if background:
                     print(f"day {day_counter}/{total_days}\n", flush=True)
                 day_counter += 1
-                pbar.reset()
+                pbar.reset(total=day_counts[curr_date])
                 pbar.set_postfix({'day': day_counter, 'total': total_days})
-                continue
 
             # get data
             success, file_list, data = wr.get_audio(timestamp=start_time.to_numpy().astype('datetime64[s]'))
 
             if success:
                 # scan clips
-                    res = CA.process_clips(data)
+                res = CA.process_clips(data)
+                
+                # format outputs
+                ranges = [x[1] for x in res]
+                timestamps = [x[2] for x in res]
+
+                # check if enough measurements have been detected across all sensors
+                if len(list(filter(has_len, ranges))) >= 4:
                     
-                    # format outputs
-                    ranges = [x[1] for x in res]
-                    timestamps = [x[2] for x in res]
+                    # build hypergraph
+                    success = l.set_measurements(ranges, adaptive=False)
 
-                    # check if enough measurements have been detected across all sensors
-                    if len(list(filter(has_len, ranges))) >= 4:
+                    if success:
+                        # assocaite/localize
+                        assocs, locs_est = l.associate_and_localize(method='partition', last_step=True)
                         
-                        # build hypergraph
-                        success = l.set_measurements(ranges, adaptive=False)
+                        # flatten outputs
+                        ranges_flat, timestamps_flat = [], []
+                        sensor_map = {}
+                        linear_counter = 0
+                        for i, (r, t) in enumerate(zip(ranges, timestamps)):
+                            for j, (rr, tt) in enumerate(zip(r, t)):
+                                
+                                ranges_flat.append(rr)
+                                timestamps_flat.append(tt)
+                                sensor_map[linear_counter] = i
 
-                        if success:
-                            # assocaite/localize
-                            assocs, locs_est = l.associate_and_localize(method='partition')
-                            
-                            # flatten outputs
-                            ranges_flat, timestamps_flat = [], []
-                            sensor_map = {}
-                            linear_counter = 0
-                            for i, (r, t) in enumerate(zip(ranges, timestamps)):
-                                for j, (rr, tt) in enumerate(zip(r, t)):
-                                    
-                                    ranges_flat.append(rr)
-                                    timestamps_flat.append(tt)
-                                    sensor_map[linear_counter] = i
-
-                                    linear_counter += 1
-                            
-                            # create dictionary to save results
-                            row_dict = {col : [] for col in columns}
-                            for i, assoc in enumerate(assocs):
-                                for m in assoc:
-                                    row_dict["id"].append(id)
-                                    row_dict["sensor"].append(ordered_sensors[sensor_map[m]])
-                                    row_dict["file_name"].append(file_list[sensor_map[m]])
-                                    row_dict["timestamp"].append(((start_time.to_numpy() + np.timedelta64(int(timestamps_flat[m] * 1000), "ms")) - start_time_dict[row_dict["file_name"][-1]]).astype('timedelta64[s]').astype(float))
-                                    row_dict["global_timestamp"].append(experimental.get_wav_timestamp(row_dict["file_name"][-1], int((row_dict["timestamp"][-1]) * 1000)))
-                                    row_dict["range"].append(np.around(ranges_flat[m], 2))
-                                    row_dict["x"].append(np.around(locs_est[i,1], 2))
-                                    row_dict["y"].append(np.around(locs_est[i,0], 2))
-                                id += 1
-                            
-                            new_row = pd.DataFrame(row_dict)
-                            new_row.to_csv(csv_path, mode='a', index=False, header=False)
+                                linear_counter += 1
+                        
+                        # create dictionary to save results
+                        row_dict = {col : [] for col in columns}
+                        for i, assoc in enumerate(assocs):
+                            for m in assoc:
+                                row_dict["id"].append(id)
+                                row_dict["sensor"].append(ordered_sensors[sensor_map[m]])
+                                row_dict["file_name"].append(file_list[sensor_map[m]])
+                                row_dict["timestamp"].append(((start_time.to_numpy() + np.timedelta64(int(timestamps_flat[m] * 1000), "ms")) - start_time_dict[row_dict["file_name"][-1]]).astype('timedelta64[s]').astype(float))
+                                row_dict["global_timestamp"].append(experimental.get_wav_timestamp(row_dict["file_name"][-1], int((row_dict["timestamp"][-1]) * 1000)))
+                                row_dict["range"].append(np.around(ranges_flat[m], 2))
+                                row_dict["x"].append(np.around(locs_est[i,1], 2))
+                                row_dict["y"].append(np.around(locs_est[i,0], 2))
+                            id += 1
+                        
+                        new_row = pd.DataFrame(row_dict)
+                        new_row.to_csv(csv_path, mode='a', index=False, header=False)
                     # update pointer and proress bar
                     l.reset()
             pbar.update(1)
 
 if __name__ == '__main__':
+
+    ###################################
+    #            scan data            #
+    ###################################
 
     # get files associated with first sensor in ordered_sensors list
     wav_files = []
@@ -295,7 +312,13 @@ if __name__ == '__main__':
         # perform scanning
         scan_experimental_data(model, args.start, args.end, 2 * args.half_window, args.overlap_fraction, args.ordered_sensors, args.background)
 
-    # plot results
+    ###################################
+    #           plot results          #
+    ###################################
+
+    fig_dir = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "detection_maps")
+    Path(fig_dir).mkdir(exist_ok=True, parents=True)
+    
     csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "multi_scan_results.csv")
     if not os.path.exists(csv_path):
         raise IOError("no results file")
@@ -326,9 +349,9 @@ if __name__ == '__main__':
 
         # plot locations by day
         locs_est = np.stack([y, x], axis=1)
-        plot_localization(locs_est, title="CCB-2022 Location Estimates", save=os.path.join(PROJECT_ROOT_DIR, "scripts", "results", f"locations_{date.date()}.png"), bathym=bathym, dates=date.date())
+        plot_localization(locs_est, title="CCB-2022 Location Estimates", save=os.path.join(fig_dir, f"locations_{date.date()}.png"), bathym=bathym, dates=date.date())
         all_dates.append(date.date())
         all_locs_est.append(locs_est)
     
     # plot all days
-    plot_localization(all_locs_est, title="CCB-2022 Location Estimates", save=os.path.join(PROJECT_ROOT_DIR, "scripts", "results", f"locations_all_dates.png"), bathym=bathym, dates=all_dates)
+    plot_localization(all_locs_est, title="CCB-2022 Location Estimates", save=os.path.join(fig_dir, f"locations_all_dates.png"), bathym=bathym, dates=all_dates)
