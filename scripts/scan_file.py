@@ -1,3 +1,7 @@
+"""
+Script to scan a file of experimental data.
+"""
+
 import os
 import argparse
 import sys
@@ -9,6 +13,7 @@ import librosa
 import numpy as np
 import pandas as pd
 from scipy import signal
+from pathlib import Path
 
 import torch
 
@@ -49,9 +54,12 @@ def scan_file(file, data_params, overlap_fraction, chunk_size, model, device, ba
 
     assert set(data_params.keys()) == set(['mu_list', 'std_list', 'fs', 'T']), 'check items in data_params dictionary.'
 
-    # results path and sensor
-    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "scan_results.csv")
+    # set up results directory
     results_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results")
+    Path(results_path).mkdir(exist_ok=True)
+
+    # path for results
+    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "scan_results.csv")
     sensor = file.split('/')[-2]
 
     # make results CSV file if it doesn't exist
