@@ -193,6 +193,38 @@ def get_wav_timestamp(wav_file, timestamp):
     # get time of timestamp
     return start_time + np.timedelta64(timestamp, 'ms')
 
+def load_wav(path, start, duration):
+    """
+    Grab mean-centered and downsampled sectino of audio from file.
+
+    Parameters
+    ----------
+    path : str
+        path to WAV file
+    start : float
+        timestamp (sec.) to start the extracted clip from
+    duration : float
+        number of seconds after 'start' to extract
+
+    Returns
+    -------
+    : array-like
+        extracted audio signal
+    """
+    
+    # load audio
+    file_samplerate = librosa.get_samplerate(path=path)
+    y, _ = librosa.load(path, sr=file_samplerate, offset=start, duration=duration)
+    
+    # resample if necessary
+    if config['signal']['fs'] != file_samplerate:
+        y = resample_poly(y, config['signal']['fs'], file_samplerate)
+    
+    # mean center
+    y = y - y.mean()
+    
+    return y
+
 class WAVReader:
     """
     Class to read a chunk of audio starting as a particular timestamp 
@@ -1106,7 +1138,7 @@ class ClipAnalyzer:
         collated_batch = self._collate_samples(clips)
 
         # preprocessing
-        preprocessed_batch = self.preprocessor(collated_batch, self.mu_list, self.std_list).to(self.device) # self._preprocess_batch(collated_batch).to(self.device)
+        preprocessed_batch = self.preprocessor(collated_batch, self.mu_list, self.std_list).to(self.device)
 
         # run through model
         with torch.set_grad_enabled(False):
