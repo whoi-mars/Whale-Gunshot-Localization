@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 from whale_gunshot_localization.utils.experimental import Localizer, MultilaterationOpt, MultilaterationGrid
@@ -173,20 +174,20 @@ def monte_carlo(measurements, source_associations, TOSSIT_associations, source_l
     if not successful:
         if possible:
             missed_association_count = True
-        return missed_association_count, FP, total_fail_count, [float('nan')], float('nan'), float('nan'), float('nan'), float('nan'), float('nan')
+        return missed_association_count, FP, total_fail_count, float('nan'), float('nan'), float('nan'), float('nan'), float('nan'), float('nan')
 
     # catch FPs
     if not possible:
         FP = True
-        return missed_association_count, FP, total_fail_count, [float('nan')], float('nan'), float('nan'), float('nan'), float('nan'), float('nan')
+        return missed_association_count, FP, total_fail_count, float('nan'), float('nan'), float('nan'), float('nan'), float('nan'), float('nan')
 
     # associate and localize
-    assoc, locs = l.associate_and_localize(method='partition')
+    assoc, locs = l.associate_and_localize(method='partition', last_step=True)
 
     # determine if number of associations is wrong
     if (len(assoc) > len(possible_associations)) and len(possible_associations) > 0:
         total_fail_count = True
-        return missed_association_count, FP, total_fail_count, [float('nan')], float('nan'), float('nan'), float('nan'), float('nan'), float('nan')
+        return missed_association_count, FP, total_fail_count, float('nan'), float('nan'), float('nan'), float('nan'), float('nan'), float('nan')
 
     # calculte measurements missed in associations
     missed_measurements = len(set(gt_nodes) - set.union(*assoc))
@@ -204,33 +205,42 @@ def monte_carlo(measurements, source_associations, TOSSIT_associations, source_l
 
     # greedily take smallest error for each
     loc_err_list = []
+    loc_err_list_str = ""
     for loc in locs:
         errs = np.sqrt(((source_locs - loc) ** 2).sum(axis=1))
         idx_delete = np.argmin(errs)
         loc_err_list.append(errs[idx_delete])
+        loc_err_list_str += str(errs[idx_delete]) + ';'
         source_locs = np.delete(source_locs, idx_delete, axis=0)
 
-    return missed_association_count, FP, total_fail_count, loc_err_list, num_wrong_associations / num_measurements, missed_measurements / num_measurements, missed_measurements, num_wrong_associations, len(assoc) / len(possible_associations)
+    return missed_association_count, FP, total_fail_count, loc_err_list_str[:-1], num_wrong_associations / num_measurements, missed_measurements / num_measurements, missed_measurements, num_wrong_associations, len(assoc) / len(possible_associations)
 
 def monte_carlo_sim(n, var_list, num_sources_list, localizer_params, set_measurement_params, data_gen_params):
+    """
+    Run sparse source data association/localization Monte Carlo simulations.
+
+    Parameters
+    ----------
+
+    """
 
     columns = ["num_sources", "var", "delete", "k", "consistency_thresh", "method_thresh", "prune", "average_estimated_source_fraction", "average_misassociated", "average_misassociated_fraction", "average_location_error", "average_missed", "average_missed_fraction", "total_fail_fraction", "no_association_fraction", "false_association_fraction"]
     df = pd.DataFrame(columns=columns)
 
-    # with tqdm(total=len(var_list) * len(num_sources_list) * n, disable=args.background) as pbar:
     for var in var_list:
-        if args.background:
-            print(f'working on -- var: {var} km...', end='', flush=True)
         for num_sources in num_sources_list:
             
+            if args.background:
+                print(f'working on -- var: {var} m, num_sources: {num_sources}...', end='', flush=True)
+
             # no successful association were made, but they were possible
-            missed_association_count = 0
+            missed_association_list = []
 
             # number of identified associations does not match number of sources
-            total_fail_count = 0
+            total_fail_list = []
             
             # count associations when it shouldn't be possible
-            FP = 0
+            FP_list = []
 
             # measurements not put in any association
             total_missed_frac_list = []
@@ -259,39 +269,39 @@ def monte_carlo_sim(n, var_list, num_sources_list, localizer_params, set_measure
                 source_locs_list.append(source_locs)
 
             with Pool(processes=100) as pool:
-                results = pool.starmap(monte_carlo, tqdm(zip(measurements_list, source_associations_list, TOSSIT_associations_list, source_locs_list, itertools.repeat(localizer_params)), total=n))
+                results = pool.starmap(monte_carlo, tqdm(zip(measurements_list, source_associations_list, TOSSIT_associations_list, source_locs_list, itertools.repeat(localizer_params)), total=n, postfix={'var' : var, 'num_sources' : num_sources}))
             
             # accumulate results
             for result in results:
-                missed_association_count += result[0]
-                FP += result[1]
-                total_fail_count += result[2]
-                loc_err_list.extend(result[3])
+                missed_association_list.append(result[0])
+                FP_list.append(result[1])
+                total_fail_list.append(result[2])
+                loc_err_list.append(result[3])
                 wrong_assoc_list.append(result[4])
                 total_missed_frac_list.append(result[5])
                 total_missed_list.append(result[6])
                 total_wrong_assoc_list.append(result[7])
                 estimated_frac_list.append(result[8])
 
-            df = pd.concat([df, pd.DataFrame({"num_sources": [num_sources],
-                                              "var": [var],
-                                              "delete": [data_gen_params["num_delete"]],
-                                              "k": [localizer_params["k"]],
-                                              "consistency_thresh": [localizer_params["consistency_thresh"]],
-                                              "method_thresh": [localizer_params["multilat"].method_thresh],
-                                              "prune": [localizer_params["prune"]],
-                                              "adaptive": [set_measurement_params["adaptive"]],
-                                              "adaptive_max": [set_measurement_params["adaptive_max"]],
-                                              "threshold_delta": [set_measurement_params["threshold_delta"]],
-                                              "average_estimated_source_fraction": [np.around(np.nanmean(estimated_frac_list), 4)],
-                                              "average_misassociated":[np.around(np.nanmean(total_wrong_assoc_list), 4)],
-                                              "average_misassociated_fraction": [np.around(np.nanmean(wrong_assoc_list), 4)],
-                                              "average_location_error": [np.around(np.nanmean(loc_err_list), 4)],
-                                              "average_missed": [np.around(np.mean(total_missed_list), 4)],
-                                              "average_missed_fraction": [np.around(np.mean(total_missed_frac_list), 4)],
-                                              "total_fail_fraction": [np.around(np.mean(total_fail_count / n), 4)],
-                                              "no_association_fraction": [np.around(np.mean(missed_association_count / n), 4)],
-                                              "false_association_fraction": [np.around(FP / n, 4)]})], ignore_index=True)
+            df = pd.concat([df, pd.DataFrame({"num_sources": [num_sources for _ in range(n)],
+                                              "var": [var for _ in range(n)],
+                                              "delete": [data_gen_params["num_delete"] for _ in range(n)],
+                                              "k": [localizer_params["k"] for _ in range(n)],
+                                              "consistency_thresh": [localizer_params["consistency_thresh"] for _ in range(n)],
+                                              "method_thresh": [localizer_params["multilat"].method_thresh for _ in range(n)],
+                                              "prune": [localizer_params["prune"] for _ in range(n)],
+                                              "adaptive": [set_measurement_params["adaptive"] for _ in range(n)],
+                                              "adaptive_max": [set_measurement_params["adaptive_max"] for _ in range(n)],
+                                              "threshold_delta": [set_measurement_params["threshold_delta"] for _ in range(n)],
+                                              "average_estimated_source_fraction": estimated_frac_list,
+                                              "average_misassociated": total_wrong_assoc_list,
+                                              "average_misassociated_fraction": wrong_assoc_list,
+                                              "average_location_error": loc_err_list,
+                                              "average_missed": total_missed_list,
+                                              "average_missed_fraction": total_missed_frac_list,
+                                              "total_fail_fraction": total_fail_list,
+                                              "no_association_fraction": missed_association_list,
+                                              "false_association_fraction": FP_list})], ignore_index=True)
 
         if args.background:
             print("done!")
@@ -324,8 +334,8 @@ if __name__ == "__main__":
 
         # run data association/localization experiment
         df = monte_carlo_sim(n=150,
-                             var_list=[500, 250, 500, 750, 1000, 1250], 
-                             num_sources_list=range(5, 6), 
+                             var_list=[1e1, 1e2, 1e3, 1e4, 1e5, 1e6], 
+                             num_sources_list=range(1, 6), 
                              localizer_params=localizer_params, 
                              set_measurement_params=set_measurement_params,
                              data_gen_params=data_gen_params,)
@@ -352,74 +362,150 @@ if __name__ == "__main__":
 
     # varying parameters
     var_list = sorted(list(set(df['var'])))
-    
+    num_sources_max = df['num_sources'].max()
+    num_sources_min = df['num_sources'].min()
+
     # get figs and axes
     figs = [plt.figure() for _ in range(7)]
     axs = [fig.gca() for fig in figs]
 
-    for var in var_list:
+    # make variance integer if possible
+    def intify(x):
+        if isinstance(x, float) and x.is_integer():
+            return int(x)
+        else:
+            return x
+        
+            
+    df['var'] = df['var'].apply(intify)
 
-        # get appropriate df rows
-        df_plot = df[df['var'] == var].sort_values(by=['num_sources'])
-        sources = df_plot['num_sources'].tolist()
+    #-----------------------------------#
+    #------- plot location error -------#
+    #-----------------------------------#
 
-        # localization error
-        axs[0].xaxis.get_major_locator().set_params(integer=True)
-        axs[0].plot(sources, df_plot['average_location_error'], '-o', label=f"$\sigma^{2}$ = {var / 1000} km")
-        axs[0].legend()
-        axs[0].set_title("Localization Error")
-        axs[0].set_xlabel("Number of Sources")
-        axs[0].set_ylabel("Average Absolute Error [m]")
+    # extract individual location errors
+    num_sources_list = []
+    location_error_list = []
+    variance_list = []
+    for _, row in df.iterrows():
+        if isinstance(row['average_location_error'], str):
+            location_error_list.extend([float(m) for m in row['average_location_error'].split(';')])
+            for _ in range(len(row['average_location_error'].split(';'))):
+                num_sources_list.append(row['num_sources'])
+                variance_list.append(row['var'])
+        else:
+            location_error_list.append(float('nan'))
+            num_sources_list.append(row['num_sources'])
+            variance_list.append(row['var'])
+    df_loc = pd.DataFrame({'num_sources' : num_sources_list,
+                           'loc_error' : location_error_list,
+                           'var' : variance_list,}).dropna(axis=0)
+    
+    # make plot
+    sns.boxplot(x=df_loc['num_sources'], 
+                y=df_loc['loc_error'], 
+                hue=df_loc['var'], 
+                showfliers=False,
+                showmeans=True,
+                linewidth=1,
+                meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                ax=axs[0])
+    axs[0].legend(title='Variance [m$^{2}$]')
+    axs[0].set_title("Localization Error")
+    axs[0].set_xlabel("Number of Sources")
+    axs[0].set_ylabel("Average Absolute Error [m]")
+    axs[0].set_axisbelow(True)
+    axs[0].set_yscale("log")
 
-        # misassociated measurements
-        axs[1].xaxis.get_major_locator().set_params(integer=True)
-        axs[1].plot(sources, df_plot["average_misassociated"], '-o', label=f"$\sigma^{2}$ = {var / 1000} km")
-        axs[1].legend()
-        axs[1].set_title("Data Association Error")
-        axs[1].set_xlabel("Number of Sources")
-        axs[1].set_ylabel("Average Number of Misassociated Measurements")
+    #------------------------------------#
+    #------- plot misassociations -------#
+    #------------------------------------#
 
-        # missed measurements
-        axs[2].xaxis.get_major_locator().set_params(integer=True)
-        axs[2].plot(sources, df_plot['average_missed'], '-o', label=f"$\sigma^{2}$ = {var / 1000} km")
-        axs[2].legend()
-        axs[2].set_title("Missed Measurements")
-        axs[2].set_xlabel("Number of Sources")
-        axs[2].set_ylabel("Average Number of Missed Measurements")
+    sns.boxplot(x=df['num_sources'],
+                y=df['average_misassociated_fraction'],
+                hue=df['var'],
+                showfliers=False,
+                showmeans=True,
+                linewidth=1,
+                meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                ax=axs[1])
+    axs[1].legend(title='Variance [m$^{2}$]')
+    axs[1].set_title("Data Association Error")
+    axs[1].set_xlabel("Number of Sources")
+    axs[1].set_ylabel("Average Fraction of Misassociated Measurements")
+    axs[1].set_axisbelow(True)
 
-        # total fails (not really verafiable)
-        axs[3].xaxis.get_major_locator().set_params(integer=True)
-        axs[3].plot(sources, df_plot['total_fail_fraction'], '-o', label=f"$\sigma^{2}$ = {var / 1000} km")
-        axs[3].legend()
-        axs[3].set_title("Total Fails")
-        axs[3].set_xlabel("Number of Sources")
-        axs[3].set_ylabel("Total Fail Run Fraction")
+    #------------------------------------#
+    #----- plot missed measurements -----#
+    #------------------------------------#
 
-        # all associations missed
-        axs[4].xaxis.get_major_locator().set_params(integer=True)
-        axs[4].plot(sources, df_plot['no_association_fraction'], '-o', label=f"$\sigma^{2}$ = {var / 1000} km")
-        axs[4].legend()
-        axs[4].set_title("Missed Associations (FN)")
-        axs[4].set_xlabel("Number of Sources")
-        axs[4].set_ylabel("Missed Association Run Fraction")
+    sns.boxplot(x=df['num_sources'],
+                y=df['average_missed_fraction'],
+                hue=df['var'],
+                showfliers=False,
+                showmeans=True,
+                linewidth=1,
+                meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                ax=axs[2])
+    axs[2].legend(title='Variance [m$^{2}$]')
+    axs[2].set_title("Missed Measurements")
+    axs[2].set_xlabel("Number of Sources")
+    axs[2].set_ylabel("Average Fraction of Missed Measurements")
 
-        # found associations when there were none
-        axs[5].xaxis.get_major_locator().set_params(integer=True)
-        axs[5].plot(sources, df_plot['false_association_fraction'], '-o', label=f"$\sigma^{2}$ = {var / 1000} km")
-        axs[5].legend()
-        axs[5].set_title("False Associations (FP)")
-        axs[5].set_xlabel("Number of Sources")
-        axs[5].set_ylabel("False Association Run Fraction")
+    sns.lineplot(x=df['num_sources'], 
+                 y=np.mean(df['total_fail_fraction']),
+                 hue=df['var'],
+                 palette=sns.color_palette("tab10"),
+                 linewidth=5,
+                 marker='o',
+                 ax=axs[3])
+    axs[3].legend(title='Variance [m$^{2}$]')
+    axs[3].set_title("Total Fails")
+    axs[3].set_xlabel("Number of Sources")
+    axs[3].set_ylabel("Total Fail Run Fraction")
+    axs[3].xaxis.get_major_locator().set_params(integer=True)
 
-        axs[6].xaxis.get_major_locator().set_params(integer=True)
-        axs[6].plot(sources, df_plot['average_estimated_source_fraction'], '-o', label=f"$\sigma^{2}$ = {var / 1000} km")
-        axs[6].legend()
-        axs[6].set_title("Percent of Sources Detected That Are Possible")
-        axs[6].set_xlabel("Number of Sources")
-        axs[6].set_ylabel("Estimated Source Run Fraction")
+    sns.lineplot(x=df['num_sources'],
+                 y=np.mean(df['no_association_fraction']),
+                 hue=df['var'],
+                 palette=sns.color_palette("tab10"),
+                 linewidth=5,
+                 marker='o',
+                 ax=axs[4])
+    axs[4].legend(title='Variance [m$^{2}$]')
+    axs[4].set_title("Missed Associations (FN)")
+    axs[4].set_xlabel("Number of Sources")
+    axs[4].set_ylabel("Missed Association Run Fraction")
+    axs[4].xaxis.get_major_locator().set_params(integer=True)
 
-    for ax in axs:
-        ax.set_ylim(bottom=0)
+    # axs[5].plot(sources, df_plot['false_association_fraction'], '-o', label=f"$\sigma^{2}$ = {int(var / 1e6) if (var / 1e6).is_integer() else var / 1e6} km")
+    sns.lineplot(x=df['num_sources'],
+                 y=np.mean(df['false_association_fraction']),
+                 hue=df['var'],
+                 palette=sns.color_palette(("tab10")),
+                 linewidth=5,
+                 marker='o',
+                 ax=axs[5])
+    axs[5].legend(title='Variance [m$^{2}$]')
+    axs[5].set_title("False Associations (FP)")
+    axs[5].set_xlabel("Number of Sources")
+    axs[5].set_ylabel("False Association Run Fraction")
+    axs[5].xaxis.get_major_locator().set_params(integer=True)
+
+    sns.boxplot(x=df['num_sources'],
+                y=df['average_estimated_source_fraction'],
+                hue=df['var'],
+                showfliers=False,
+                showmeans=True,
+                linewidth=1,
+                meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                ax=axs[6])
+    axs[6].legend(title='Variance [m$^{2}$]')
+    axs[6].set_title("Percent of Sources Detected That Are Possible")
+    axs[6].set_xlabel("Number of Sources")
+    axs[6].set_ylabel("Estimated Source Run Fraction")
+
+    for i, ax in enumerate(axs):
         ax.grid()
 
     plt.show()
