@@ -5,6 +5,7 @@ import math
 from multiprocessing import Pool
 import pickle
 
+from pathlib import Path
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
@@ -34,29 +35,29 @@ def bearing_error(bearing1, bearing2):
     theta[theta > 180] = 360 - theta[theta > 180]
     return theta
 
-def plot_localization(source_locs, locs_est=None, title='', buffer=6000): 
+# def plot_localization(source_locs, locs_est=None, title='', buffer=6000): 
     
-    # load constants
-    TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-    min_x = config['scaling']['min_x']
-    max_x = config['scaling']['max_x']
-    min_y = config['scaling']['min_y']
-    max_y = config['scaling']['max_y']
+#     # load constants
+#     TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
+#     min_x = config['scaling']['min_x']
+#     max_x = config['scaling']['max_x']
+#     min_y = config['scaling']['min_y']
+#     max_y = config['scaling']['max_y']
     
-    fig, ax = plt.subplots(1, 1)
-    ax.plot(TOSSIT_locations[:,1], TOSSIT_locations[:,0], '^', markersize=12, label='sensor', markeredgewidth=2)
-    ax.plot(source_locs[:,1], source_locs[:,0], 'o', label='ground truth')
-    if locs_est is not None:
-        ax.plot(locs_est[:,1], locs_est[:,0], 'x', label='estimate', markeredgewidth=2)
-    ax.set_xlabel("X [m]")
-    ax.set_ylabel("Y [m]")
-    ax.set_xlim([min_x-buffer, max_x+buffer])
-    ax.set_ylim([min_y-buffer, max_y+buffer])
-    ax.invert_yaxis()
-    ax.legend()
-    if len(title):
-        ax.set_title(title)
-    fig.savefig('test.png')
+#     fig, ax = plt.subplots(1, 1)
+#     ax.plot(TOSSIT_locations[:,1], TOSSIT_locations[:,0], '^', markersize=12, label='sensor', markeredgewidth=2)
+#     ax.plot(source_locs[:,1], source_locs[:,0], 'o', label='ground truth')
+#     if locs_est is not None:
+#         ax.plot(locs_est[:,1], locs_est[:,0], 'x', label='estimate', markeredgewidth=2)
+#     ax.set_xlabel("X [m]")
+#     ax.set_ylabel("Y [m]")
+#     ax.set_xlim([min_x-buffer, max_x+buffer])
+#     ax.set_ylim([min_y-buffer, max_y+buffer])
+#     ax.invert_yaxis()
+#     ax.legend()
+#     if len(title):
+#         ax.set_title(title)
+#     fig.savefig('test.png')
 
 def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000), timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, max_channel_offset=40, rng=None):
     
@@ -190,15 +191,15 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
         return path_detected, theta, theta_hat
     return path_detected, float('nan'), float('nan')
 
-def monte_carlo_sim(n, max_time_offset_list, var_list, localizer_params, set_measurement_params, data_gen_params):
+def monte_carlo_sim(n, max_time_offset_list, var_list, std_list, localizer_params, set_measurement_params, data_gen_params):
     
     assert data_gen_params['beam_width'] == 0, "beam width must be 0 for monte carlo simulations"
 
-    columns = ["k", "consistency_thresh", "method_thresh", "prune", "max_time_offset", "measurement_variance", "success_rate", "theta_error"]
+    columns = ["k", "consistency_thresh", "method_thresh", "prune", "max_time_offset", "std", "success_rate", "theta_error"]
     df = pd.DataFrame(columns=columns)
 
     for max_time_offset in max_time_offset_list:
-        for var in var_list:
+        for std in std_list:
             if args.background:
                 print(f'working on -- max_time_offset: {max_time_offset}, var: {var} km...', flush=True)
             
@@ -216,12 +217,12 @@ def monte_carlo_sim(n, max_time_offset_list, var_list, localizer_params, set_mea
             measurements_set_list = []
             for _ in range(n):
                 # generate data
-                source_locs, measurements_list = generate_trajectory(measurement_stats=(0, var), max_channel_offset=max_time_offset, **data_gen_params)
+                source_locs, measurements_list = generate_trajectory(measurement_stats=(0, std ** 2), max_channel_offset=max_time_offset, **data_gen_params)
                 source_locs_list.append(source_locs)
                 measurements_set_list.append(measurements_list)
             
             with Pool(processes=100) as pool:
-                results = pool.starmap(monte_carlo, tqdm(zip(source_locs_list, measurements_set_list, itertools.repeat(localizer_params)), total=n, disable=args.background, postfix={'max_time_offset' : max_time_offset, 'var' : var}))
+                results = pool.starmap(monte_carlo, tqdm(zip(source_locs_list, measurements_set_list, itertools.repeat(localizer_params)), total=n, disable=args.background, postfix={'max_time_offset' : max_time_offset, 'std' : std}))
 
             # save values
             for result_set in results:
@@ -238,7 +239,7 @@ def monte_carlo_sim(n, max_time_offset_list, var_list, localizer_params, set_mea
                 "method_thresh" : [localizer_params["multilat"].method_thresh for _ in range(n)],
                 "prune" : [localizer_params["prune"] for _ in range(n)],
                 "max_time_offset" : [max_time_offset for _ in range(n)],
-                "measurement_variance" : [var for _ in range(n)],
+                "std" : [std for _ in range(n)],
                 "success_rate" : success_list.tolist(),
                 "theta_error" : bearing_error(theta_list, theta_hat_list).tolist(),
             })])
@@ -251,6 +252,9 @@ if __name__ == "__main__":
     path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder", "path_finder_sim_results.csv")
     fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder")
 
+    # set up results directory
+    Path(fig_path).mkdir(exist_ok=True)
+
     ##########################################
     #          simulate/load results         #
     ##########################################
@@ -262,13 +266,13 @@ if __name__ == "__main__":
         rng2 = np.random.default_rng(54321)
 
         # parameters
-        localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=0.95, rng=rng1), consistency_thresh=1000, prune=False)
+        localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=0.95, rng=rng1), consistency_thresh=3500, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
         data_gen_params = dict(rng=rng2, num_points=8, beam_width=0, timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2)
 
         df = monte_carlo_sim(n=150,
                              max_time_offset_list=[0, 10],
-                             var_list=[1e1, 1e2, 1e3, 1e4, 1e5, 1e6], 
+                             std_list=[3.1622776601683795, 10.0, 31.622776601683793, 100.0, 316.22776601683796, 1000.0], 
                              localizer_params=localizer_params,
                              set_measurement_params=set_measurement_params,
                              data_gen_params=data_gen_params)
@@ -287,32 +291,14 @@ if __name__ == "__main__":
     # matplotlib settings
     matplotlib.rcParams.update({'font.size' : 16})
 
-    # # set of variances tested
-    var_list = sorted(list(set(df['measurement_variance'])))
-    # max_time_offset_list = sorted(list(set(df['max_time_offset'])))
+    # set of variances tested
+    std_list = sorted(list(set(df['std'])))
 
-    # # get values to plot
-    # data = dict()
-    # for max_time_offset in max_time_offset_list:
-    #     theta_error = []
-    #     theta_error_std = []
-    #     for var in var_list:
-    #         df_plot = df[(df['measurement_variance'] == var) & (df['max_time_offset'] == max_time_offset)]
-    #         theta_error.extend(df_plot['theta_error'].tolist())
-    #         theta_error_std.extend(df_plot['theta_error_std'].tolist())
-    #     data[str(max_time_offset)] = [theta_error, theta_error_std]
-    # get figs and axes
+
     figs = [plt.figure() for _ in range(1)]
     axs = [fig.gca() for fig in figs]
 
-    # with open(os.path.join(fig_path, 'data.pkl'), 'rb') as f:
-    #     data = pickle.load(f) 
-
-    # bearing error
-    # x = np.arange(len(var_list))
-    # width = 0.25
-    # multiplier = 0
-    sns.boxplot(x=df['measurement_variance'], 
+    sns.boxplot(x=df['std'], 
                 y=df['theta_error'], 
                 hue=df['max_time_offset'], 
                 ax=axs[0], 
@@ -320,32 +306,12 @@ if __name__ == "__main__":
                 showmeans=True, 
                 linewidth=1, 
                 meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},)
-    axs[0].set_xticks(np.arange(len(var_list)), [str(int(var)) if var.is_integer() else str(var) for var in var_list])
-    axs[0].set_xlabel("Range Measurement Variance [m$^{2}$]")
+    axs[0].set_xticks(np.arange(len(var_list)), [str(int(std)) if std.is_integer() else str(np.around(std, 2)) for std in std_list])
+    axs[0].set_xlabel("Range Measurement Variance [m]")
     axs[0].set_ylabel("Absolute Theta Error [$^{\circ}$]")
     axs[0].set_title("Bearing Error")
-    axs[0].legend(title='max channel offset')
+    axs[0].legend(title='max channel offset [s]')
     axs[0].set_axisbelow(True)
-
-    # offset = width * multiplier
-    # print([bearing_error(measurement[0], measurement[1]) for a, measurement in data.items()])
-    # axs[0].boxplot([bearing_error(measurement[0], measurement[1]) for a, measurement in data.items()], showfliers=False)
-    # rects = axs[0].bar(x + offset, measurement[0], width, label=attribute + " s", yerr=measurement[1], capsize=10)
-    # axs[0].bar_label(rects, padding=3)
-    # multiplier += 1
-    
-    # print(data['10000.0_10'][0])
-    # all_data = [np.random.normal(0, std, 100) for std in range(6, 10)]
-
-    # print(data['100000.0_0'][0])
-    # print(data['100000.0_0'][1])
-    # print(bearing_error(data['100000.0_0'][0], data['100000.0_0'][1]))
-    # axs[0].boxplot(bearing_error(data['1000000.0_0'][0], data['1000000.0_0'][1]), showfliers=False, showmeans=True)
-
-    # axs[0].legend(loc='upper left')
-    # axs[0].set_xlabel("Range Measurement Variance [m$^{2}$]")
-    # axs[0].set_ylabel("Absolute Theta Error [$^{\circ}$]")
-    # axs[0].set_title("Bearing Error")
 
     for ax in axs:
         ax.grid()
