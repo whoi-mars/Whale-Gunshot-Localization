@@ -480,7 +480,8 @@ class MultilaterationOpt(MultilaterationBase):
 
         # random initial guess
         # x0 = [self.rng.uniform(self.min_y, self.max_y), self.rng.uniform(self.min_x, self.max_x)]
-        x0 = [self.rng.uniform(-5000, 5000), self.rng.uniform(-5000, 5000)]
+        x0 = [(config['scaling']['min_x'] + config['scaling']['max_x']) / 2, (config['scaling']['min_y'] + config['scaling']['max_y']) / 2]
+        #[self.rng.uniform(-10000, 10000), self.rng.uniform(-10000, 10000)]
 
         # optimize!
         #res = minimize(obj, x0, method='Nelder-Mead', options={'disp': False})
