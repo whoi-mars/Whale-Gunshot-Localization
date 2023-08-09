@@ -11,6 +11,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.linear_model import LinearRegression
+from sklearn.decomposition import PCA
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 import pandas as pd
 
@@ -26,6 +29,15 @@ parser.add_argument('--save_figs', action='store_true',
 parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
 args = parser.parse_args()
+
+def nested_list_max(l):
+    maxx = -float('inf')
+    for ll in l:
+        if len(ll):
+            ll = sorted(ll)
+            if ll[-1] > maxx:
+                maxx = ll[-1]
+    return maxx
 
 def get_bearing(x_ends, y_ends):
     return math.atan2(y_ends[1] - y_ends[0], x_ends[1] - x_ends[0]) * (180 / math.pi)
@@ -59,7 +71,7 @@ def bearing_error(bearing1, bearing2):
 #         ax.set_title(title)
 #     fig.savefig('test.png')
 
-def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000), timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, max_channel_offset=40, rng=None):
+def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000), timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, max_channel_offset=40, rng=None, in_sensors=False):
     
     # check inputs
     assert num_points > 0, "number of sources must be non-negative"
@@ -76,10 +88,17 @@ def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000)
     
     # get TOSSIT locations and extreme coordinate values
     TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-    min_x = config['scaling']['min_x']
-    max_x = config['scaling']['max_x']
-    min_y = config['scaling']['min_y']
-    max_y = config['scaling']['max_y']
+
+    if in_sensors:
+        min_x = np.min(TOSSIT_locations[:,1])
+        max_x = np.max(TOSSIT_locations[:,1])
+        min_y = np.min(TOSSIT_locations[:,0])
+        max_y = np.max(TOSSIT_locations[:,0])
+    else:
+        min_x = config['scaling']['min_x']
+        max_x = config['scaling']['max_x']
+        min_y = config['scaling']['min_y']
+        max_y = config['scaling']['max_y']
     
     # choose number of sources and generate source locations
     source_locs = np.concatenate((rng.uniform(min_y, max_y, size=(1,1)), rng.uniform(min_x, max_x, size=(1,1))), axis=1)
@@ -152,7 +171,10 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
     l = Localizer(**localizer_params)
 
     # calculate bearing
-    theta = get_bearing([source_locs[0,1], source_locs[-1,1]], [-source_locs[0,0], -source_locs[-1,0]])
+    # theta = get_bearing([source_locs[0,1], source_locs[-1,1]], [-source_locs[0,0], -source_locs[-1,0]])
+    idx1 = np.argmin(source_locs[:,1])
+    idx2 = np.argmax(source_locs[:,1])
+    theta = get_bearing([source_locs[idx1,1], source_locs[idx2,1]], [-source_locs[idx1,0], -source_locs[idx2,0]])
 
     # build hypergraph
     path_detected = False
@@ -175,23 +197,36 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
                 locs_ests = np.append(locs_ests, locs_est, axis=0)
 
     if path_detected:
+        # # make point vectors
+        # x = locs_ests[:, [1]]
+        # y = -locs_ests[:,0]
+
+        # # get endpoints of a regression on the
+        # # estimated locations
+        # reg = LinearRegression().fit(x,y)
+        
+        # # get theta_hat
+        # # x_ends = np.asarray([x[0], x[-1]])
+        # x_ends = np.asarray([[np.min(x)], [np.max(x)]])
+        # y_ends = reg.predict(x_ends)
+        # theta_hat = get_bearing(x_ends.squeeze(), y_ends)
+        
         # make point vectors
         x = locs_ests[:, [1]]
         y = -locs_ests[:,0]
 
-        # get endpoints of a regression on the
-        # estimated locations
-        reg = LinearRegression().fit(x,y)
-        
-        # get theta_hat
-        x_ends = np.asarray([x[0], x[-1]])
-        y_ends = reg.predict(x_ends)
+        pcr = make_pipeline(StandardScaler(), PCA(n_components=1), LinearRegression())
+        pcr.fit(x, y)
+        pca = pcr.named_steps["pca"]
+
+        x_ends = np.asarray([[np.min(x)], [np.max(x)]])
+        y_ends = pcr.predict(x_ends)
         theta_hat = get_bearing(x_ends.squeeze(), y_ends)
 
         return path_detected, theta, theta_hat
     return path_detected, float('nan'), float('nan')
 
-def monte_carlo_sim(n, max_time_offset_list, var_list, std_list, localizer_params, set_measurement_params, data_gen_params):
+def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_measurement_params, data_gen_params):
     
     assert data_gen_params['beam_width'] == 0, "beam width must be 0 for monte carlo simulations"
 
@@ -201,7 +236,7 @@ def monte_carlo_sim(n, max_time_offset_list, var_list, std_list, localizer_param
     for max_time_offset in max_time_offset_list:
         for std in std_list:
             if args.background:
-                print(f'working on -- max_time_offset: {max_time_offset}, var: {var} km...', flush=True)
+                print(f'working on -- max_time_offset: {max_time_offset}, std: {std} m...', flush=True)
             
             # keep track of theta
             theta_list = []
@@ -217,7 +252,10 @@ def monte_carlo_sim(n, max_time_offset_list, var_list, std_list, localizer_param
             measurements_set_list = []
             for _ in range(n):
                 # generate data
-                source_locs, measurements_list = generate_trajectory(measurement_stats=(0, std ** 2), max_channel_offset=max_time_offset, **data_gen_params)
+                while True:
+                    source_locs, measurements_list = generate_trajectory(measurement_stats=(0, std ** 2), max_channel_offset=max_time_offset, **data_gen_params)
+                    if all([abs(nested_list_max(l)) <= config['scaling']['max_r'] for l in measurements_list]):
+                        break
                 source_locs_list.append(source_locs)
                 measurements_set_list.append(measurements_list)
             
@@ -249,7 +287,7 @@ def monte_carlo_sim(n, max_time_offset_list, var_list, std_list, localizer_param
 if __name__ == "__main__":
 
     # path for results CSV
-    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder", "path_finder_sim_results.csv")
+    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder", "path_finder_sim_results_in_sensors.csv")
     fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder")
 
     # set up results directory
@@ -266,13 +304,13 @@ if __name__ == "__main__":
         rng2 = np.random.default_rng(54321)
 
         # parameters
-        localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=0.95, rng=rng1), consistency_thresh=3500, prune=False)
+        localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=float('inf'), rng=rng1), consistency_thresh=3500, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
-        data_gen_params = dict(rng=rng2, num_points=8, beam_width=0, timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2)
+        data_gen_params = dict(rng=rng2, num_points=8, beam_width=0, timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, in_sensors=True)
 
         df = monte_carlo_sim(n=150,
                              max_time_offset_list=[0, 10],
-                             std_list=[3.1622776601683795, 10.0, 31.622776601683793, 100.0, 316.22776601683796, 1000.0], 
+                             std_list=[0, 250, 500, 750, 1000], 
                              localizer_params=localizer_params,
                              set_measurement_params=set_measurement_params,
                              data_gen_params=data_gen_params)
@@ -294,6 +332,12 @@ if __name__ == "__main__":
     # set of variances tested
     std_list = sorted(list(set(df['std'])))
 
+    # make variance integer if possible
+    def intify(x):
+        if isinstance(x, float) and x.is_integer():
+            return str(int(x))
+        else:
+            return str(np.around(x, 2))
 
     figs = [plt.figure() for _ in range(1)]
     axs = [fig.gca() for fig in figs]
@@ -306,15 +350,21 @@ if __name__ == "__main__":
                 showmeans=True, 
                 linewidth=1, 
                 meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},)
-    axs[0].set_xticks(np.arange(len(var_list)), [str(int(std)) if std.is_integer() else str(np.around(std, 2)) for std in std_list])
-    axs[0].set_xlabel("Range Measurement Variance [m]")
+    axs[0].set_xticks(np.arange(len(std_list)), [intify(std) for std in std_list])
+    axs[0].set_xlabel("Range Measurement Standard Deviation [m]")
     axs[0].set_ylabel("Absolute Theta Error [$^{\circ}$]")
     axs[0].set_title("Bearing Error")
     axs[0].legend(title='max channel offset [s]')
     axs[0].set_axisbelow(True)
+    # sns.stripplot(data=df, ax=axs[0], x="std", y="theta_error", hue="max_time_offset", palette=sns.color_palette("tab10"), dodge=True)
+    # axs[0].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
 
     for ax in axs:
         ax.grid()
 
     if args.save_figs:
         figs[0].savefig(os.path.join(fig_path, "theta_error.png"))
+
+    # make table of means and stds
+    dff = df.groupby(by=['std', 'max_time_offset']).agg({'theta_error' : ['mean', 'std']})
+    print(dff)
