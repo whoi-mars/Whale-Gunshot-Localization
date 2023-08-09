@@ -83,7 +83,7 @@ if __name__ == "__main__":
     Path(fig_dir).mkdir(exist_ok=True, parents=True)
 
     # grab spectrograms
-    df = pd.read_csv("results/multi_scan_results_high_snr.csv")
+    df = pd.read_csv("results/multi_scan_results.csv")
     results = get_spects_by_id(df, np.arange(1, df['id'].max()))
     
     # make and save figures
