@@ -8,7 +8,6 @@ import numpy as np
 import torch
 from scipy.signal import resample_poly, find_peaks
 from scipy.optimize import least_squares
-import gtsam
 import pandas as pd
 import librosa
 
