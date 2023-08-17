@@ -238,7 +238,6 @@ def monte_carlo(measurements, source_associations, TOSSIT_associations, source_l
         best_match = min(set_differences, key=len)
         num_wrong_associations += len(best_match)
 
-    # greedily take smallest error for each
     # loc_err_list = []
     loc_err_list_str = ""
     num_ests = locs_no_dup.shape[0]
