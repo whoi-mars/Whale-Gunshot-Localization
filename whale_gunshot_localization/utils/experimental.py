@@ -637,7 +637,7 @@ class Localizer:
         Python object used to perform multilateration
     """
     
-    def __init__(self, k, multilat, consistency_thresh=1000, prune=False):
+    def __init__(self, k, multilat, consistency_thresh=1000, dup_thresh=4000, prune=False):
         """
         Construct attributes
         
@@ -650,6 +650,8 @@ class Localizer:
         consistency_thresh : float
             threshold for distance from range to location to determine which measurements groups
             are self-consistent
+        dup_thresh : float
+            threshold for two localization estimates to be reduced to the same estimate
         prune : bool
             whether to prune measurement groups based on lack of range measurement intersection
         """
@@ -677,6 +679,9 @@ class Localizer:
         
         # prune sets of k measurements based on pairwise intersection check
         self.prune = prune
+
+        # threshold for two location estimates to be reduced
+        self.dup_thresh = dup_thresh
 
         self.multilat = multilat
         self.multilat.set_map({
@@ -829,8 +834,77 @@ class Localizer:
         self._tuple_idx = None
         self._sensors = None
         self._ranges = None
+    
+    def _eliminate_dups(self, locs, assocs, thresh=2000):
+        """
+        Eliminate duplicate location estiamtes based on a distance threshold.
 
-    def _last_step(self, associations):
+        Parameters
+        ----------
+        locs : array-like
+            Matrix of locations of shape N X 2
+        assocs : List[Set]
+            Input associations
+        thresh : float
+            Distance threshold to reduce the location estimates
+
+        Returns
+        -------
+        assocs_no_dups : List[Set]
+            Reduced associations
+        locs_no_dups : array-like
+            Reduced matrix of locations of shape M X 2
+        """
+
+        assocs = np.asarray(assocs, dtype=object)
+        locs_no_dups = []
+        assocs_no_dups = []
+        while True:
+            idx = np.arange(len(locs))
+                        
+            if len(locs) == 1:
+                #print("last")
+                locs_no_dups.append(locs[0])
+                assocs_no_dups.append(assocs[0])
+                break
+            
+            if len(locs) == 0:
+                #print("zero")
+                break
+
+            # remove the ith location estimate
+            sub_idx = np.delete(idx, 0, axis=0)
+
+            # get distance form ith location estimate to the rest
+            dists = np.sqrt(((locs[sub_idx] - locs[0]) ** 2).sum(axis=1))
+
+            if (dists <= thresh).sum():
+                #print("yep")
+                to_del = [0] + list(sub_idx[dists <= thresh])
+                
+                new_association = set.union(*assocs[to_del])
+                
+                # get sensor indices and ranges
+                sensors = self._sensors[list(new_association)]
+                ranges = self._ranges[list(new_association)]
+                
+                _, loc = self.multilat.localize(ranges, sensors)
+                locs_no_dups.append(loc)
+                assocs_no_dups.append(new_association)
+
+                #print(locs.shape)
+                locs = np.delete(locs, to_del, axis=0)
+                assocs = np.delete(assocs, to_del, axis=0)
+            else:
+                #print("nope")
+                locs_no_dups.append(locs[0])
+                assocs_no_dups.append(assocs[0])
+                locs = np.delete(locs, 0, axis=0)
+                assocs = np.delete(assocs, 0, axis=0)
+
+        return assocs_no_dups, np.asarray(locs_no_dups)
+
+    def _last_step(self, locs, associations):
         """
         Greedy algorithm to make sure each association has only one measurement from any given sensor.
         It finds the lowest cost member of each association among multiple measurements from a given sensor
@@ -838,6 +912,8 @@ class Localizer:
 
         Parameters
         ----------
+        locs : array-like
+            Matrix of locations of shape N X 2
         assocaitions : List[Set]
             Input associations
         
@@ -864,6 +940,7 @@ class Localizer:
                 if len(intersection) > 1:
                     max_err = float('inf')
                     best_assoc = None
+                    best_loc = None
                     for i in itertools.combinations(intersection, len(intersection) - 1):
 
                         # take away all but one measurement from the sensor measurements
@@ -874,17 +951,20 @@ class Localizer:
                         ranges = self._ranges[list(popped_a)]
                         
                         # calculate localization cost and update best
-                        cost, _ = self.multilat.localize(ranges, sensors)
+                        cost, loc = self.multilat.localize(ranges, sensors)
+
                         if cost < max_err:
                             max_err = cost
                             best_assoc = popped_a
+                            best_loc = loc
                     
                     # update association
                     associations[a_idx] = best_assoc
+                    locs[a_idx] = best_loc         
 
-        return [assoc for assoc in associations if len(assoc) >= 3]
+        return [assoc for assoc in associations if len(assoc) >= 3], np.asarray([loc for i, loc in enumerate(locs) if len(associations[i]) >= 3])
 
-    def associate_and_localize(self, method='clique', last_step=True):
+    def associate_and_localize(self, method='clique', reduce_dups=True, last_step=True):
         """
         Using the hypergraph constructed in self.set_measurements, perform data association
         and localization.
@@ -919,8 +999,8 @@ class Localizer:
         elif method == 'partition':
             HG = hmod.precompute_attributes(self.H)
             associations = hmod.kumar(HG)
-            if last_step:
-                associations = self._last_step(associations)
+            # if last_step:
+            #     associations = self._last_step(associations)
         else:
             raise ValueError("Method must be either 'clique' or 'partition'")
 
@@ -933,6 +1013,10 @@ class Localizer:
             locs.append(loc)
         locs = np.asarray(locs)
         
+        if reduce_dups:
+            associations, locs = self._eliminate_dups(locs, associations, thresh=self.dup_thresh)
+        if last_step:
+            associations, locs = self._last_step(locs, associations)
         return associations, locs
 
 #######################################################################################################
