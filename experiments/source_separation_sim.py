@@ -28,6 +28,78 @@ parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
 args = parser.parse_args()
 
+def plot_localization(locs_est, buffer=0, title=None, bathym=None, dates=None, save=None): 
+    """
+    Plot estimated source locations.
+
+    Parameters
+    ----------
+    locs_est : List[np.array], with each subarray of shape N X 2
+        list of lists of estimated locations where the first column stores the Y
+        coordinate and the second stores the X coordinates
+    buffer : float
+        how much to plot outside of the limits established in the config file
+    title : str
+        plot title
+    bathym : PIL.Image
+        geotiff of the bathymetry
+    dates : List[datetime.datetime]
+        list of dates associated with each sublist of location estiamtes
+        in locs_est
+    save : str
+        path at which to save the plot if desired
+    """
+
+    # format inputs
+    if not isinstance(locs_est, list):
+        locs_est = [locs_est]
+    if not isinstance(dates, list):
+        dates = [dates]
+    # assert len(locs_est) == len(dates), "locs_est and dates lists must have a one-to-one correspondence"
+
+    # random list of color for plotting
+    rng = np.random.default_rng(1111)
+    colors = [rng.uniform(0, 1, size=3) for _ in range(len(locs_est))]
+
+    # load constants
+    TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
+    min_x = config['scaling']['min_x']
+    max_x = config['scaling']['max_x']
+    min_y = config['scaling']['min_y']
+    max_y = config['scaling']['max_y']
+    map_origin = config['TOSSIT']['map_origin']
+    dy = config['TOSSIT']['dy']
+    dx = config['TOSSIT']['dx']
+
+    # crop bathymetry appropriately 
+    bathym = bathym.crop((round(map_origin[1] + (min_x/dx) - (buffer/dx)), 
+                          round(map_origin[0] + (min_y/dy) - (buffer/dy)), 
+                          round(map_origin[1] + (max_x/dx) + (buffer/dx)), 
+                          round(map_origin[0] + (max_y/dy) + (buffer/dy))))
+
+    fig, ax = plt.subplots(1, 1)
+    ax.plot(TOSSIT_locations[:,1], TOSSIT_locations[:,0], '^', color="#21EE71", markersize=10, label='sensor', markeredgewidth=2)
+    for i, l in enumerate(locs_est):
+        ax.plot(l[:,1], l[:,0], 'x', color=colors[i], label=f'estimate ({dates[i]})' if dates[0] else 'estimate', markersize=6, markeredgewidth=2)
+    if title is not None:
+        ax.set_title(title)
+    ax.set_xlabel("X [m]")
+    ax.set_ylabel("Y [m]")
+    ax.set_xlim([min_x-buffer, max_x+buffer])
+    ax.set_ylim([min_y-buffer, max_y+buffer])
+    ax.invert_yaxis()
+    implot = ax.imshow(bathym, extent=(min_x - buffer, max_x + buffer, max_y + buffer, min_y - buffer))
+    # ax.legend()
+    
+    # save or show
+    if save is not None:
+        fig.savefig(save)
+    else:
+        fig.show()
+    
+    # close figure
+    plt.close(fig)
+
 def nested_list_max(l):
     maxx = -float('inf')
     for ll in l:
@@ -39,7 +111,10 @@ def nested_list_max(l):
 
 def is_in_bay(source_locs, bathym, map_origin, dx, dy):
     for loc in source_locs:
-        if bathym.getpixel((round(map_origin[1] + loc[1]/dx), round(map_origin[0] + loc[0]/dy))) == 147:
+        line1 = loc[0] - 0.88434446716*loc[1] < -38672.47
+        line2 = loc[0] - 0.84448322668*loc[1] > 19385.3 
+        pixel = bathym.getpixel((round(map_origin[1] + loc[1]/dx), round(map_origin[0] + loc[0]/dy)))
+        if pixel == 147 or line1 or line2:
             return False
     return True
 
@@ -175,7 +250,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
     res = np.sqrt(((source_loc_combs[np.argmin(errors_matrix),:num_ests,:] - locs_est[np.newaxis,:,:]) ** 2).sum(axis=2)).flatten()
 
     # calculate best possible localization errors with correct associations
-    detected_sources = sorted(source_loc_idx_combs[np.argmin(errors_matrix)])
+    detected_sources = source_loc_idx_combs[np.argmin(errors_matrix)][:num_ests]
     measurements_flat = np.concatenate(measurements)
     TOSSIT_flat = np.concatenate(t_assocs)
     localizer = MultilaterationOpt()
@@ -188,13 +263,14 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
         'max_y' : config['scaling']['max_y'],
     })
 
+
     best_locs = []
     for sidx in detected_sources:
         idx = np.where(assoc_flat == sidx)[0]
         _, loc = localizer.localize(measurements_flat[idx], TOSSIT_flat[idx])
         best_locs.append(loc)
     best_locs = np.asarray(best_locs)
-    best_res = np.sqrt(((best_locs - s_locs) ** 2).sum(axis=1))
+    best_res = np.sqrt(((best_locs - s_locs[detected_sources]) ** 2).sum(axis=1))
 
 
     # calculate percentage of possible sources localized
@@ -240,6 +316,11 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
                 source_associations_list.append(source_associations)
                 TOSSIT_associations_list.append(TOSSIT_associations)
                 source_locs_list.append(source_locs)
+
+            # Image.MAX_IMAGE_PIXELS = 729744000
+            # bathym = Image.open(os.path.join(config['dataset']['data_directory'], "mikesbathym.tif"))
+            # plot_localization(source_locs_list, buffer=0, title=None, bathym=bathym, dates=None, save='image.png') 
+            # return
 
             # delayed for loop using dask
             results = []
@@ -318,7 +399,7 @@ if __name__ == "__main__":
         # parameters for localizer and data_generator
         localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=float('inf'), rng=rng1), consistency_thresh=2000, dup_thresh=3000, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
-        data_gen_params = dict(num_delete=0, rng=rng2, in_sensors=True)
+        data_gen_params = dict(num_delete=0, rng=rng2, in_sensors=False)
 
         # run MC
         df = run_monte_carlo(n=150,
@@ -342,7 +423,7 @@ if __name__ == "__main__":
 
     # varying parameters
     # var_list = sorted(list(set(df['var'])))
-    std_list = sorted(list(set(df['std'])))
+    std_list_all = sorted(list(set(df['std'])))
     num_sources_max = df['num_sources'].max()
     num_sources_min = df['num_sources'].min()
 
@@ -367,6 +448,8 @@ if __name__ == "__main__":
     best_location_error_list = []
     std_list = []
     len_detects = []
+    # location_error_dict = {(s, n): [] for s in std_list_all for n in range(num_sources_min, num_sources_max + 1)}
+    # best_location_error_dict = {(s, n): [] for s in std_list_all for n in range(num_sources_min, num_sources_max + 1)} 
     for _, row in df.iterrows():
         if isinstance(row['localization_error'], str):
             for err, best_err in zip(row['localization_error'].split(';')[:-1], row['best_localization_error'].split(';')[:-1]):
@@ -375,6 +458,10 @@ if __name__ == "__main__":
                 location_error_list.append(float(err))
                 best_location_error_list.append(float(best_err))
                 std_list.append(row['std'])
+
+                # location_error_dict[(row['std'], row['num_sources'])].append(float(err))
+                # best_location_error_dict[(row['std'], row['num_sources'])].append(float(best_err))
+
     
     df_loc = pd.DataFrame({'num_sources': num_sources_list,
                            'loc_error': location_error_list,
@@ -393,10 +480,54 @@ if __name__ == "__main__":
                 meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
                 ax=axs[0])
     axs[0].legend(title='Standard Deviation [m]')
-    axs[0].set_title("Localization Error")
+    axs[0].set_title("Unsupervised Localization Error")
     axs[0].set_xlabel("Number of Sources")
     axs[0].set_ylabel("RMSE [m]")
     axs[0].set_axisbelow(True)
+    axs[0].set_ylim([0, 7000])
+
+    sns.boxplot(x=df_loc['num_sources'], 
+                y=df_loc['best_loc_error'], 
+                hue=[intify(x) for x in df_loc['std']], 
+                showfliers=False,
+                showmeans=True,
+                linewidth=1,
+                meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                ax=axs[1])
+    axs[1].legend(title='Standard Deviation [m]')
+    axs[1].set_title("Ideal Localization Error")
+    axs[1].set_xlabel("Number of Sources")
+    axs[1].set_ylabel("RMSE [m]")
+    axs[1].set_axisbelow(True)
+    axs[1].set_ylim([0, 7000])
+
+    # vals = np.zeros((len(std_list_all), num_sources_max - num_sources_min + 1))
+    # vals_best = np.zeros((len(std_list_all), num_sources_max - num_sources_min + 1))
+    # for i, std in enumerate(std_list_all):
+    #     for j, n in enumerate(range(num_sources_min, num_sources_max + 1)):
+    #         q1 = np.percentile(location_error_dict[(std, n)], 25)
+    #         q3 = np.percentile(location_error_dict[(std, n)], 75)
+    #         q1b = np.percentile(best_location_error_dict[(std, n)], 25)
+    #         q3b = np.percentile(best_location_error_dict[(std, n)], 75)
+    #         IQR = q3 - q1
+    #         IQRb = q3b - q1b
+
+    #         location_error_dict[(std, n)] = np.asarray(location_error_dict[(std, n)])
+    #         best_location_error_dict[(std, n)] = np.asarray(best_location_error_dict[(std, n)])
+    #         val = np.percentile(location_error_dict[(std, n)][location_error_dict[(std, n)] > 1.5*IQR], 90)
+    #         val_best = np.percentile(best_location_error_dict[(std, n)][best_location_error_dict[(std, n)] > 1.5*IQRb], 90)
+    #         vals[i,j] = val
+    #         vals_best[i,j] = val_best
+
+    # total1 = []
+    # total2 = []
+    # for v1, v2 in zip(location_error_dict.values(), best_location_error_dict.values()):
+    #     total1 += v1
+    #     total2 += v2
+    # print(np.percentile(total1, 90), np.percentile(total2, 90))
+    # print(np.percentile(location_error_list, 90))
+    # sns.heatmap(vals, ax=axs[3])
+    # sns.heatmap(vals_best, ax=axs[4])
 
     for ax in axs:
         ax.grid()
@@ -405,9 +536,33 @@ if __name__ == "__main__":
                                                      'FN': ['mean'],
                                                      'FP': ['mean'],
                                                      'percent_possible_detections': ['mean','std']})
-    
-    print(pd.concat([dff, loc_cols], axis=1))
 
     if args.save_figs:
         fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments","results", "data_assoc_and_loc")
         figs[0].savefig(os.path.join(fig_path, "test.png"))
+        figs[1].savefig(os.path.join(fig_path, "ttest.png"))
+
+    # results table
+    print(pd.concat([dff, loc_cols], axis=1))
+    
+    # get number of outliers
+    location_error_list = np.asarray(location_error_list)
+    best_location_error_list = np.asarray(best_location_error_list)
+
+    q3 = np.percentile(location_error_list, 75)
+    q1 = np.percentile(location_error_list, 25)
+    q3b = np.percentile(best_location_error_list, 75)
+    q1b = np.percentile(best_location_error_list, 25)
+    
+    IQR = q3 - q1
+    IQRb = q3b - q1b
+
+    dff.to_csv('summary.csv')
+    print()
+    print("-----------------------------------------------")
+    print("% Outliers: ", np.around(100 * len(location_error_list[location_error_list >= 1.5*IQR])/len(location_error_list), 2))
+    print("% Outliers Best: ", np.around(100 * len(best_location_error_list[best_location_error_list >= 1.5*IQRb])/len(best_location_error_list), 2))
+    print("-----------------------------------------------")
+    print("90th Percentile Outliers: ", np.around(np.percentile(location_error_list[location_error_list >= 1.5*IQR],90)), " m")
+    print("90th Percentile Outliers Best: ", np.around(np.percentile(best_location_error_list[best_location_error_list >= 1.5*IQRb],90)), " m")
+    print("-----------------------------------------------")
