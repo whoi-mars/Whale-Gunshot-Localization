@@ -1234,20 +1234,26 @@ class ClipAnalyzer:
 if __name__ == "__main__":
     wr = WAVReader(sensors=config['TOSSIT']['ids'], chunk_size=160)
     ts = np.datetime64('2023-04-05T00:15:40')
+
+    import time
+
+    start = time.time()
     success, files, d = wr.get_audio(ts)
+    end = time.time()
+    print(end - start)
 
-    # get files associated with first sensor in ordered_sensors list
-    wav_files = []
-    for s in config['TOSSIT']['ids']:
-        wav_files.extend(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], s, "*.wav")))
-    wav_files = np.asarray(wav_files)
+    # # get files associated with first sensor in ordered_sensors list
+    # wav_files = []
+    # for s in config['TOSSIT']['ids']:
+    #     wav_files.extend(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], s, "*.wav")))
+    # wav_files = np.asarray(wav_files)
 
-    # sort wav files in chonological order by start time
-    wav_files, start_times, end_times = sort_wav_chronological(wav_files)
-    start_time_dict = dict(zip(wav_files, start_times))
-    end_time_dict = dict(zip(wav_files, end_times))
+    # # sort wav files in chonological order by start time
+    # wav_files, start_times, end_times = sort_wav_chronological(wav_files)
+    # start_time_dict = dict(zip(wav_files, start_times))
+    # end_time_dict = dict(zip(wav_files, end_times))
 
-    print(success)
-    print(ts)
-    for f in files:
-        print(start_time_dict[f], end_time_dict[f])
+    # print(success)
+    # print(ts)
+    # for f in files:
+    #     print(start_time_dict[f], end_time_dict[f])
