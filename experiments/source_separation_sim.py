@@ -199,7 +199,10 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
     for s in range(num_sources):
         delete_num = rng.choice([0, num_delete])
         if delete_num:
-            to_delete = rng.choice(np.arange(TOSSIT_locations.shape[0]), replace=False, size=delete_num)
+            # to_delete = rng.choice(np.arange(TOSSIT_locations.shape[0]), replace=False, size=delete_num)
+            to_delete = delete_num
+            distances = np.sqrt(((TOSSIT_locations - source_locs[s,:]) ** 2).sum(axis=1))
+            to_delete = np.argsort(distances)[::-1][:TOSSIT_locations.shape[0] - delete_num] #rng.choice(np.arange(TOSSIT_locations.shape[0]), replace=False, size=delete_num)
             for d in to_delete:
                 idx = np.argwhere(source_associations[d] == s)
                 range_measurements[d] = np.delete(range_measurements[d], idx)
@@ -324,7 +327,7 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
             for i in range(n):
                 while True:
                     measurements, source_associations, TOSSIT_associations, source_locs = generate_measurements(num_sources=num_sources, var=std ** 2, **data_gen_params)
-                    if np.concatentate(measurements).max() <= config['scaling']['max_r'] \
+                    if np.concatenate(measurements).max() <= config['scaling']['max_r'] \
                        and math_tools.is_sparse_locs(source_locs, thresh=sparse_distance) \
                        and is_in_bay(source_locs, bathym, map_origin, dx, dy):
                         break
@@ -332,7 +335,6 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
                 source_associations_list.append(source_associations)
                 TOSSIT_associations_list.append(TOSSIT_associations)
                 source_locs_list.append(source_locs)
-            return
 
             # Image.MAX_IMAGE_PIXELS = 729744000
             # bathym = Image.open(os.path.join(config['dataset']['data_directory'], "mikesbathym.tif"))
@@ -418,7 +420,7 @@ if __name__ == "__main__":
         # parameters for localizer and data_generator
         localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=float('inf'), rng=rng1), consistency_thresh={0: 50, 250: 1000, 500: 1500, 750: 2000, 1000: 2000}, dup_thresh=3000, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
-        data_gen_params = dict(num_delete=0, rng=rng2, in_sensors=False)
+        data_gen_params = dict(num_delete=6, rng=rng2, in_sensors=True)
 
         # run MC
         df = run_monte_carlo(n=150,
@@ -544,6 +546,8 @@ if __name__ == "__main__":
 
 
     figg, axx = plt.subplots(vals.shape[0], vals.shape[1], figsize=(26,26))
+    if not isinstance(axx, np.ndarray):
+        axx = np.asarray([[axx]])
     for i, std in enumerate(std_list_all):
         for j, n in enumerate(range(num_sources_min, num_sources_max + 1)):
             _,bins,_ = axx[i,j].hist(location_error_dict[(std,n)] / 1000, alpha=0.5, bins=50, label='unsupervised')
