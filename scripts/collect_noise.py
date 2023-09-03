@@ -108,7 +108,7 @@ def collect_noise(n, fs_target, T_target):
         
         # downsample and save
         wav = resample_poly(wav, fs_target, f_samplerate)
-        
+
         X[i,:] = wav
 
     # save as MAT file
