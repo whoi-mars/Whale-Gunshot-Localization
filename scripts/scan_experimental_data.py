@@ -22,6 +22,8 @@ from scipy import signal
 import matplotlib.pyplot as plt
 from PIL import Image
 from pathlib import Path
+import pyproj as proj
+import pygmt
 
 from whale_gunshot_localization.models.tcn_archs import TCNRangeAndClassify
 import whale_gunshot_localization.utils.experimental as experimental
@@ -46,13 +48,85 @@ parser.add_argument('-b', '--background', action='store_true',
 args = parser.parse_args()
 
 if args.scan:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     if torch.cuda.is_available():
         print("Using the GPU!", flush=True)
     else:
         print("WARNING: Could not find GPU. Using CPU only.", flush=True)
 
-def plot_localization(locs_est, buffer=13000, title=None, bathym=None, dates=None, save=None): 
+# def plot_localization(locs_est, buffer=13000, title=None, bathym=None, dates=None, save=None): 
+#     """
+#     Plot estimated source locations.
+
+#     Parameters
+#     ----------
+#     locs_est : List[np.array], with each subarray of shape N X 2
+#         list of lists of estimated locations where the first column stores the Y
+#         coordinate and the second stores the X coordinates
+#     buffer : float
+#         how much to plot outside of the limits established in the config file
+#     title : str
+#         plot title
+#     bathym : PIL.Image
+#         geotiff of the bathymetry
+#     dates : List[datetime.datetime]
+#         list of dates associated with each sublist of location estiamtes
+#         in locs_est
+#     save : str
+#         path at which to save the plot if desired
+#     """
+
+#     # format inputs
+#     if not isinstance(locs_est, list):
+#         locs_est = [locs_est]
+#     if not isinstance(dates, list):
+#         dates = [dates]
+#     assert len(locs_est) == len(dates), "locs_est and dates lists must have a one-to-one correspondence"
+
+#     # random list of color for plotting
+#     rng = np.random.default_rng(1111)
+#     colors = [rng.uniform(0, 1, size=3) for _ in range(len(locs_est))]
+
+#     # load constants
+#     TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
+#     min_x = config['scaling']['min_x']
+#     max_x = config['scaling']['max_x']
+#     min_y = config['scaling']['min_y']
+#     max_y = config['scaling']['max_y']
+#     map_origin = config['TOSSIT']['map_origin']
+#     dy = config['TOSSIT']['dy']
+#     dx = config['TOSSIT']['dx']
+
+#     # crop bathymetry appropriately 
+#     bathym = bathym.crop((round(map_origin[1] + (min_x/dx) - (buffer/dx)), 
+#                           round(map_origin[0] + (min_y/dy) - (buffer/dy)), 
+#                           round(map_origin[1] + (max_x/dx) + (buffer/dx)), 
+#                           round(map_origin[0] + (max_y/dy) + (buffer/dy))))
+
+#     fig, ax = plt.subplots(1, 1)
+#     ax.plot(TOSSIT_locations[:,1], TOSSIT_locations[:,0], '^', color="#21EE71", markersize=10, label='sensor', markeredgewidth=2)
+#     for i, l in enumerate(locs_est):
+#         ax.plot(l[:,1], l[:,0], 'x', color=colors[i], label=f'estimate ({dates[i]})' if dates[0] else 'estimate', markersize=6, markeredgewidth=2)
+#     if title is not None:
+#         ax.set_title(title)
+#     ax.set_xlabel("X [m]")
+#     ax.set_ylabel("Y [m]")
+#     ax.set_xlim([min_x-buffer, max_x+buffer])
+#     ax.set_ylim([min_y-buffer, max_y+buffer])
+#     ax.invert_yaxis()
+#     implot = ax.imshow(bathym, extent=(min_x - buffer, max_x + buffer, max_y + buffer, min_y - buffer))
+#     ax.legend()
+    
+#     # save or show
+#     if save is not None:
+#         fig.savefig(save)
+#     else:
+#         fig.show()
+    
+#     # close figure
+#     plt.close(fig)
+
+def plot_localization(locs_est, buffer=6000, title=None, bathym=None, dates=None, save=None, legend_transparency=0): 
     """
     Plot estimated source locations.
 
@@ -83,47 +157,35 @@ def plot_localization(locs_est, buffer=13000, title=None, bathym=None, dates=Non
 
     # random list of color for plotting
     rng = np.random.default_rng(1111)
-    colors = [rng.uniform(0, 1, size=3) for _ in range(len(locs_est))]
+    colors = [rng.uniform(0, 255, size=3) for _ in range(len(locs_est))]
 
     # load constants
-    TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
+    # TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
+    TOSSIT_latlons = np.asarray([config['TOSSIT']['TOSSIT_lat'], config['TOSSIT']['TOSSIT_lon']]).T
     min_x = config['scaling']['min_x']
     max_x = config['scaling']['max_x']
     min_y = config['scaling']['min_y']
     max_y = config['scaling']['max_y']
-    map_origin = config['TOSSIT']['map_origin']
-    dy = config['TOSSIT']['dy']
-    dx = config['TOSSIT']['dx']
 
-    # crop bathymetry appropriately 
-    bathym = bathym.crop((round(map_origin[1] + (min_x/dx) - (buffer/dx)), 
-                          round(map_origin[0] + (min_y/dy) - (buffer/dy)), 
-                          round(map_origin[1] + (max_x/dx) + (buffer/dx)), 
-                          round(map_origin[0] + (max_y/dy) + (buffer/dy))))
-
-    fig, ax = plt.subplots(1, 1)
-    ax.plot(TOSSIT_locations[:,1], TOSSIT_locations[:,0], '^', color="#21EE71", markersize=10, label='sensor', markeredgewidth=2)
-    for i, l in enumerate(locs_est):
-        ax.plot(l[:,1], l[:,0], 'x', color=colors[i], label=f'estimate ({dates[i]})' if dates[0] else 'estimate', markersize=6, markeredgewidth=2)
-    if title is not None:
-        ax.set_title(title)
-    ax.set_xlabel("X [m]")
-    ax.set_ylabel("Y [m]")
-    ax.set_xlim([min_x-buffer, max_x+buffer])
-    ax.set_ylim([min_y-buffer, max_y+buffer])
-    ax.invert_yaxis()
-    implot = ax.imshow(bathym, extent=(min_x - buffer, max_x + buffer, max_y + buffer, min_y - buffer))
-    ax.legend()
+    # define projection object
+    pargs = proj.Proj(proj="aeqd", lat_0=TOSSIT_latlons[0,0], lon_0=TOSSIT_latlons[0,1], datum="WGS84", units="m")
     
-    # save or show
+    # get lon/lat bounds for the map
+    lon, lat = pargs([min_x-buffer, max_x+buffer], [min_y-buffer, max_y+buffer], inverse=True)
+    region = [*lon, *lat]
+
+    fig = pygmt.Figure()
+    fig.basemap(region=region, projection="M15c", frame=True)
+    fig.coast(land="black", water="skyblue4")
+    fig.plot(x=TOSSIT_latlons[:,1], y=TOSSIT_latlons[:,0], style="t0.3c", fill="grey", pen="black", label="sensors")
+    for i, l in enumerate(locs_est):
+        lon_est, lat_est = pargs(l[:,1], -l[:,0], inverse=True)
+        fig.plot(x=lon_est, y=lat_est, style="x0.3c", pen=f"1p,{colors[i][0]}/{colors[i][1]}/{colors[i][2]}", label=f'estimate ({dates[i]})' if dates[0] else 'estimate')
+    
+    fig.legend(transparency=legend_transparency)
+
     if save is not None:
         fig.savefig(save)
-    else:
-        fig.show()
-    
-    # close figure
-    plt.close(fig)
-    
 
 def has_len(x):
     """
@@ -153,7 +215,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
     """
     
     # set up results directory
-    Path(os.path.join(PROJECT_ROOT_DIR, "scripts", "results")).mkdir(exist_ok=True)
+    Path(os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'])).mkdir(parents=True, exist_ok=True)
 
     # get files associated with first sensor in ordered_sensors list
     wav_files = []
@@ -173,7 +235,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
     wr = experimental.WAVReader(sensors=ordered_sensors, chunk_size=chunk_size, fs_desired=config['signal']['fs'])
 
     # set up CSV for saving results
-    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "multi_scan_results.csv")
+    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "multi_scan_results.csv")
     columns = ["id", "sensor", "file_name", "timestamp", "global_timestamp", "range", "y", "x"]  
     if not os.path.exists(csv_path):
         pd.DataFrame(columns=columns).to_csv(csv_path, index=False)
@@ -194,7 +256,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
     CA = experimental.ClipAnalyzer(model, data_params, preprocessor=experimental.l2_standardize, device=device)
 
     # prepare localizer object
-    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=float('inf')), consistency_thresh=1200, prune=False)
+    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=float('inf')), consistency_thresh=2000, prune=False)
 
     # get starts of chunks to read and total days
     chunk_starts = pd.date_range(start=start, end=end, freq=f"{chunk_size}s")
@@ -207,17 +269,19 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
     # scan files
     day_counter = 1
     curr_date = chunk_starts[0].date()
+    if background:
+        print(f"day {day_counter}/{total_days}\n", flush=True)
     with tqdm(total=day_counts[curr_date], disable=background) as pbar:
         for i, start_time in enumerate(chunk_starts):
 
             # if we are on a new day, reset tqdm bar
             if start_time.date() != curr_date:
                 curr_date = start_time.date()
-                if background:
-                    print(f"day {day_counter}/{total_days}\n", flush=True)
                 day_counter += 1
                 pbar.reset(total=day_counts[curr_date])
                 pbar.set_postfix({'day': day_counter, 'total': total_days})
+                if background:
+                    print(f"day {day_counter}/{total_days}\n", flush=True)
 
             # get data
             success, file_list, data = wr.get_audio(timestamp=start_time.to_numpy().astype('datetime64[s]'))
@@ -238,7 +302,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
 
                     if success:
                         # assocaite/localize
-                        assocs, locs_est = l.associate_and_localize(method='partition', last_step=True)
+                        assocs, locs_est = l.associate_and_localize(method='partition', reduce_dups=False, last_step=True)
                         
                         # flatten outputs
                         ranges_flat, timestamps_flat = [], []
@@ -305,7 +369,7 @@ if __name__ == '__main__':
                                     dropout=0.05).to(device)
 
         # load model weights
-        state_dict = torch.load(os.path.join(config['models']['checkpoints_directories'] + config['models']['model_dir'], 'weights_best.pt'),
+        state_dict = torch.load(os.path.join(config['models']['checkpoints_directories'], config['models']['model_dir'], 'weights_best.pt'),
                                 map_location=device)['model_state_dict']
         model.load_state_dict(state_dict)
 
@@ -316,10 +380,10 @@ if __name__ == '__main__':
     #           plot results          #
     ###################################
 
-    fig_dir = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "detection_maps")
+    fig_dir = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "detection_maps")
     Path(fig_dir).mkdir(exist_ok=True, parents=True)
     
-    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "multi_scan_results.csv")
+    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "multi_scan_results.csv")
     if not os.path.exists(csv_path):
         raise IOError("no results file")
     df = pd.read_csv(csv_path)
@@ -349,9 +413,9 @@ if __name__ == '__main__':
 
         # plot locations by day
         locs_est = np.stack([y, x], axis=1)
-        plot_localization(locs_est, title="CCB-2022 Location Estimates", save=os.path.join(fig_dir, f"locations_{date.date()}.png"), bathym=bathym, dates=date.date())
+        plot_localization(locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_{date.date()}.png"), bathym=bathym, dates=date.date())
         all_dates.append(date.date())
         all_locs_est.append(locs_est)
-    
+        
     # plot all days
-    plot_localization(all_locs_est, title="CCB-2022 Location Estimates", save=os.path.join(fig_dir, f"locations_all_dates.png"), bathym=bathym, dates=all_dates)
+    plot_localization(all_locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_all_dates.png"), bathym=bathym, dates=all_dates, legend_transparency=70)
