@@ -79,11 +79,11 @@ def get_spects_by_id(df, Id):
 if __name__ == "__main__":
 
     # prepare directory to save images
-    fig_dir = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "detection_spects")
+    fig_dir = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "detection_spects")
     Path(fig_dir).mkdir(exist_ok=True, parents=True)
 
     # grab spectrograms
-    df = pd.read_csv("results/multi_scan_results.csv")
+    df = pd.read_csv(os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "multi_scan_results.csv"))
     results = get_spects_by_id(df, np.arange(1, df['id'].max()))
     
     # make and save figures
