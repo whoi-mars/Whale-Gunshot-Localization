@@ -196,13 +196,11 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
         source_associations.append(np.arange(num_sources))
         
     # delete from each source
-    for s in range(num_sources):
-        delete_num = rng.choice([0, num_delete])
-        if delete_num:
-            # to_delete = rng.choice(np.arange(TOSSIT_locations.shape[0]), replace=False, size=delete_num)
-            to_delete = delete_num
+    if num_delete:
+        num_delete = rng.choice([0, num_delete])
+        for s in range(num_sources): 
             distances = np.sqrt(((TOSSIT_locations - source_locs[s,:]) ** 2).sum(axis=1))
-            to_delete = np.argsort(distances)[::-1][:TOSSIT_locations.shape[0] - delete_num] #rng.choice(np.arange(TOSSIT_locations.shape[0]), replace=False, size=delete_num)
+            to_delete = np.argsort(distances)[::-1][:TOSSIT_locations.shape[0] - num_delete]
             for d in to_delete:
                 idx = np.argwhere(source_associations[d] == s)
                 range_measurements[d] = np.delete(range_measurements[d], idx)
@@ -219,6 +217,16 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
 
 
 def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
+
+    # initialize results dict
+    results = {
+        "over_predict_sources": float('nan'),
+        "FN": False,
+        "FP": False,
+        "percent_possible_detections": float('nan'),
+        "localization_error": float('nan'),
+        "best_localization_error": float('nan'),
+    }
 
     # boolean results
     over_predict_sources = False
@@ -243,18 +251,27 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
         # check for FN
         if possible:
             FN = True
-        return float('nan'), FN, FP, float('nan'), float('nan'), float('nan')
+            results["FN"] = True
+        #return float('nan'), FN, FP, float('nan'), float('nan'), float('nan')
+        return results
     else:
         # check for FP
         if not possible:
             FP = True
-            return float('nan'), FN, FP, float('nan'), float('nan'), float('nan')
+            results["FP"] = True
+            #return float('nan'), FN, FP, float('nan'), float('nan'), float('nan')
+            return results
         assocs_est, locs_est = L.associate_and_localize(method='partition', reduce_dups=True, last_step=True)
+
+    # if no FP or FN, set over_predict_sources to False
+    results["over_predict_sources"] = False
 
     # if we predict too many sources return
     if locs_est.shape[0] > s_locs.shape[0]:
         over_predict_sources = True
-        return over_predict_sources, FN, FP, float('nan'), float('nan'), float('nan')
+        results["over_predict_sources"]
+        #return over_predict_sources, FN, FP, float('nan'), float('nan'), float('nan')
+        return results
 
     # calculate location errors
     num_ests = locs_est.shape[0]
@@ -262,6 +279,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
     source_loc_idx_combs = np.asarray(list(map(list, itertools.permutations(np.arange(s_locs.shape[0])))))
     errors_matrix = np.sqrt(((source_loc_combs[:,:num_ests,:] - locs_est[np.newaxis,:,:]) ** 2).sum(axis=2)).sum(axis=1)
     res = np.sqrt(((source_loc_combs[np.argmin(errors_matrix),:num_ests,:] - locs_est[np.newaxis,:,:]) ** 2).sum(axis=2)).flatten()
+    results["localization_error"] = res
 
     # calculate best possible localization errors with correct associations
     detected_sources = source_loc_idx_combs[np.argmin(errors_matrix)][:num_ests]
@@ -277,7 +295,6 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
         'max_y' : config['scaling']['max_y'],
     })
 
-
     best_locs = []
     for sidx in detected_sources:
         idx = np.where(assoc_flat == sidx)[0]
@@ -285,13 +302,14 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
         best_locs.append(loc)
     best_locs = np.asarray(best_locs)
     best_res = np.sqrt(((best_locs - s_locs[detected_sources]) ** 2).sum(axis=1))
-
+    results['best_localization_error'] = best_res
 
     # calculate percentage of possible sources localized
     percent_possible_detections = len(assocs_est) / len(possible_associations)
+    results['percent_possible_detections'] = percent_possible_detections
     
-    return over_predict_sources, FN, FP, percent_possible_detections, res, best_res
-
+    #return over_predict_sources, FN, FP, percent_possible_detections, res, best_res
+    return results
 
 def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_params, set_measurement_params, data_gen_params):
 
@@ -366,23 +384,31 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
             for result in results:
                 
                 # save results
-                source_over_predict_list.append(result[0]),
-                FN_list.append(result[1])
-                FP_list.append(result[2])
-                percent_possible_detections_list.append(result[3])
+                # source_over_predict_list.append(result[0]),
+                # FN_list.append(result[1])
+                # FP_list.append(result[2])
+                # percent_possible_detections_list.append(result[3])
+                source_over_predict_list.append(result['over_predict_sources']),
+                FN_list.append(result["FN"])
+                FP_list.append(result["FP"])
+                percent_possible_detections_list.append(result["percent_possible_detections"])
                 
                 # save localization errors in a string format
-                if isinstance(result[4], np.ndarray):
+                # if isinstance(result[4], np.ndarray):
+                if isinstance(result["localization_error"], np.ndarray):
                     loc_err_str = ""
                     best_loc_err_str = ""
-                    for err, best_err in zip(result[4], result[5]):
+                    # for err, best_err in zip(result[4], result[5]):
+                    for err, best_err in zip(result["localization_error"], result["best_localization_error"]):
                         loc_err_str += f"{err};"
                         best_loc_err_str += f"{best_err};"
                     localization_error_list.append(loc_err_str)
                     best_localization_error_list.append(best_loc_err_str)
                 else:
-                    localization_error_list.append(result[4])
-                    best_localization_error_list.append(result[5])
+                    # localization_error_list.append(result[4])
+                    # best_localization_error_list.append(result[5])
+                    localization_error_list.append(result["localization_error"])
+                    best_localization_error_list.append(result["best_localization_error"])
 
             # append results to dataframe
             df = pd.concat([df, pd.DataFrame({"num_sources": [num_sources for _ in range(n)],
@@ -397,10 +423,6 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
     return df
 
 if __name__ == "__main__":
-    
-    # dask setup
-    cluster = LocalCluster(n_workers=100, processes=True)
-    client = Client(cluster)
 
     # path for results CSV
     path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "data_assoc_and_loc", "data_association_and_localization_sim_results.csv")
@@ -411,6 +433,10 @@ if __name__ == "__main__":
 
     if args.simulate:
 
+        # dask setup
+        cluster = LocalCluster(n_workers=100, processes=True)
+        client = Client(cluster)
+
         # set random seed
         # make two of these for monte carlo and localizer and make an internal one for monte
         # carlo which does either the source locations or variance
@@ -418,12 +444,12 @@ if __name__ == "__main__":
         rng2 = np.random.default_rng(1524)
 
         # parameters for localizer and data_generator
-        localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=float('inf'), rng=rng1), consistency_thresh={0: 50, 250: 1000, 500: 1500, 750: 2000, 1000: 2000}, dup_thresh=3000, prune=False)
+        localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=float('inf'), rng=rng1), consistency_thresh={0: 2, 250: 500, 500: 1500, 750: 2000, 1000: 2500}, dup_thresh=3000, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
         data_gen_params = dict(num_delete=6, rng=rng2, in_sensors=True)
 
         # run MC
-        df = run_monte_carlo(n=150,
+        df = run_monte_carlo(n=300,
                              std_list=[0, 250, 500, 750, 1000],
                              num_sources_list=range(1,6),
                              sparse_distance=10,
@@ -468,13 +494,11 @@ if __name__ == "__main__":
     location_error_list = []
     best_location_error_list = []
     std_list = []
-    len_detects = []
     location_error_dict = {(s, n): [] for s in std_list_all for n in range(num_sources_min, num_sources_max + 1)}
     best_location_error_dict = {(s, n): [] for s in std_list_all for n in range(num_sources_min, num_sources_max + 1)} 
     for _, row in df.iterrows():
         if isinstance(row['localization_error'], str):
             for err, best_err in zip(row['localization_error'].split(';')[:-1], row['best_localization_error'].split(';')[:-1]):
-                len_detects.append(len(row['localization_error'].split(';')[:-1]))
                 num_sources_list.append(row['num_sources'])
                 location_error_list.append(float(err))
                 best_location_error_list.append(float(best_err))
@@ -502,8 +526,10 @@ if __name__ == "__main__":
                 ax=axs[0])
     axs[0].legend(title='Standard Deviation [m]')
     axs[0].set_title("Unsupervised Localization Error")
+    #axs[0].set_title("Unsupervised Localization Error (N/2 Measuements)")
     axs[0].set_xlabel("Number of Sources")
     axs[0].set_ylabel("Error [m]")
+    #axs[0].set_ylim([0, 8000])
     axs[0].set_axisbelow(True)
 
     sns.boxplot(x=df_loc['num_sources'], 
@@ -516,11 +542,16 @@ if __name__ == "__main__":
                 ax=axs[1])
     axs[1].legend(title='Standard Deviation [m]')
     axs[1].set_title("Ideal Localization Error")
+    #axs[1].set_title("Ideal Localization Error (N/2 Measurements)")
     axs[1].set_xlabel("Number of Sources")
     axs[1].set_ylabel("Error [m]")
+    #axs[1].set_ylim([0, 8000])
     axs[1].set_axisbelow(True)
 
-    # outlier analysis
+    #-----------------------------------#
+    #--------- outlier analysis --------#
+    #-----------------------------------#
+
     vals = np.zeros((len(std_list_all), num_sources_max - num_sources_min + 1))
     vals_best = np.zeros(vals.shape)
     anno = np.zeros(vals.shape)
@@ -544,34 +575,16 @@ if __name__ == "__main__":
             anno[i,j] = len(location_error_dict[(std, n)][location_error_dict[(std, n)] > 1.5*IQR]) / len(location_error_dict[(std, n)])
             annob[i,j] = len(best_location_error_dict[(std, n)][best_location_error_dict[(std, n)] > 1.5*IQRb]) / len(best_location_error_dict[(std, n)])
 
-
-    figg, axx = plt.subplots(vals.shape[0], vals.shape[1], figsize=(26,26))
-    if not isinstance(axx, np.ndarray):
-        axx = np.asarray([[axx]])
-    for i, std in enumerate(std_list_all):
-        for j, n in enumerate(range(num_sources_min, num_sources_max + 1)):
-            _,bins,_ = axx[i,j].hist(location_error_dict[(std,n)] / 1000, alpha=0.5, bins=50, label='unsupervised')
-            axx[i,j].hist(best_location_error_dict[(std,n)] / 1000, alpha=0.5, bins=bins, label='ideal')
-            axx[i,j].set_title(f"n={n}, $\sigma$={std} m", fontsize=22)
-            axx[i,j].tick_params(axis='x', labelsize=16)
-            axx[i,j].tick_params(axis='y', labelsize=16)
-            axx[i,j].yaxis.get_offset_text().set_fontsize(14)
-            axx[i,j].xaxis.get_offset_text().set_fontsize(14)
-    handles, labels = axx[0,0].get_legend_handles_labels()
-    figg.legend(handles, labels, loc='upper center', prop={'size': 28})
-    figg.subplots_adjust(wspace=0.35, hspace=0.35)
-    figg.text(0.5, 0.04, "Localization Error [km]", ha='center', va='center', fontsize=28)
-    figg.text(0.05, 0.5, "Example Count", ha='center', va='center', rotation=90, fontsize=28)
-
     sns.heatmap(vals, 
                 annot=anno,
                 xticklabels=range(num_sources_min, num_sources_max + 1),
                 yticklabels=std_list_all,
-                cbar_kws={'label': '90th Perentile Outliers'}, 
+                cbar_kws={'label': '90th Percentile Outliers'}, 
                 ax=axs[2])
     axs[2].set_xlabel("Number of Sources")
     axs[2].set_ylabel("Measurement Standard Deviation [m]")
     axs[2].set_title("Outlier Analysis (Unsupervised)")
+    #axs[2].set_title("Outlier Analysis (Unsupervised, N/2 Measurements)")
     axs[2].invert_yaxis()
 
 
@@ -584,10 +597,38 @@ if __name__ == "__main__":
     axs[3].set_xlabel("Number of Sources")
     axs[3].set_ylabel("Measurement Standard Deviation [m]")
     axs[3].set_title("Outlier Analysis (Ideal)")
+    #axs[3].set_title("Outlier Analysis (Ideal, N/2 Measurements)")
     axs[3].invert_yaxis()
 
+    #-----------------------------------#
+    #-------- error districutions ------#
+    #-----------------------------------#
+
+    figg, axx = plt.subplots(vals.shape[0], vals.shape[1], figsize=(26,26))
+    if not isinstance(axx, np.ndarray):
+        axx = np.asarray([[axx]])
+    elif len(axx.shape) < 2:
+        axx = np.asarray([axx])
+
+    for i, std in enumerate(std_list_all):
+        for j, n in enumerate(range(num_sources_min, num_sources_max + 1)):
+            #_,bins,_ = axx[i,j].hist(location_error_dict[(std,n)] / 1000, alpha=0.5, bins=150, label='unsupervised (N/2 measurements)')
+            #axx[i,j].hist(best_location_error_dict[(std,n)] / 1000, alpha=0.5, bins=bins, label='ideal (N/2 measurements)')
+            _,bins,_ = axx[i,j].hist(location_error_dict[(std,n)] / 1000, alpha=0.5, bins=150, label='unsupervised')
+            axx[i,j].hist(best_location_error_dict[(std,n)] / 1000, alpha=0.5, bins=bins, label='ideal')
+            axx[i,j].set_title(f"n={n}, $\sigma$={std} m", fontsize=22)
+            axx[i,j].tick_params(axis='x', labelsize=16)
+            axx[i,j].tick_params(axis='y', labelsize=16)
+            axx[i,j].yaxis.get_offset_text().set_fontsize(14)
+            axx[i,j].xaxis.get_offset_text().set_fontsize(14)
+    handles, labels = axx[0,0].get_legend_handles_labels()
+    figg.legend(handles, labels, loc='upper center', prop={'size': 28})
+    figg.subplots_adjust(wspace=0.35, hspace=0.35)
+    figg.text(0.5, 0.04, "Localization Error [km]", ha='center', va='center', fontsize=28)
+    figg.text(0.05, 0.5, "Example Count", ha='center', va='center', rotation=90, fontsize=28)
+
     for i, ax in enumerate(axs):
-        if i == 2 or i == 3:
+        if i in [2, 3]:
             continue
         ax.grid()
 

@@ -2,7 +2,6 @@ import os
 import argparse
 import itertools
 import math
-from multiprocessing import Pool
 import pickle
 
 from pathlib import Path
@@ -16,7 +15,12 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 import pandas as pd
+import dask
+from dask.distributed import Client, LocalCluster, progress
+from PIL import Image
 
+
+import whale_gunshot_localization.utils.math_tools as math_tools
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 from whale_gunshot_localization.utils.experimental import Localizer, MultilaterationOpt, MultilaterationGrid
 
@@ -39,10 +43,82 @@ def nested_list_max(l):
                 maxx = ll[-1]
     return maxx
 
+def is_in_bay(source_locs, bathym, map_origin, dx, dy):
+    """
+    Check if source locations are in CCB.
+    
+    Parameters
+    ----------
+    source_locs : array-like[array-like]
+        matrix of generated source locations'
+    bathym : PIL.Image
+        geotiff of the bathymetry
+    map_origin : array-like of shape 1 X 2
+        pixels coordinates of the origin of the bathymetry map
+    dx : float
+        approximate change in meters when going in the X direction
+    dy : float
+        approximate change in meters when going in the Y direction
+    
+    Returns
+    -------
+    : bool
+        whether all source_locs are in water (True) or not (False)
+    """
+
+    for loc in source_locs:
+        # line cutting off locations on the open-ocean side of Provincetown
+        line1 = loc[0] - 0.88434446716*loc[1] < -38672.47
+        # line cutting off locations on the west side of the Cape Cod Canal
+        line2 = loc[0] - 0.84448322668*loc[1] > 19385.3 
+        pixel = bathym.getpixel((round(map_origin[1] + loc[1]/dx), round(map_origin[0] + loc[0]/dy)))
+        if pixel == 147 or line1 or line2:
+            return False
+    return True
+
 def get_bearing(x_ends, y_ends):
+    """
+    Given the x/y enpoints of a line, return the bearing.
+
+    Parameters
+    ----------
+    x_ends : array-like
+        list of start and end x coordinates of line
+    y_ends : array-like
+        list of start and end y coordinates of line
+
+    Returns
+    -------
+    : float
+        bearing of line
+    """
+
     return math.atan2(y_ends[1] - y_ends[0], x_ends[1] - x_ends[0]) * (180 / math.pi)
 
 def bearing_error(bearing1, bearing2):
+    """
+    Calculate the error between two bearings
+
+    Parameters
+    ----------
+    bearing1 : array-like
+        list of bearings
+    bearing2 : array-like
+        list of corresponding bearings
+
+    Returns
+    -------
+    : array-like
+        list of bearing errors
+    """
+
+    # make sure bearings are numpy arrays
+    if not isinstance(bearing1, np.ndarray):
+        bearing1 = np.asarray([bearing1])
+    if not isinstance(bearing2, np.ndarray):
+        bearing2 = np.asarray([bearing2])
+
+    # calculate bearing error
     theta = np.abs(bearing1 - bearing2)
     theta[theta > 180] = 360 - theta[theta > 180]
     return theta
@@ -167,6 +243,12 @@ def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000)
     return source_locs, measurements_list
 
 def monte_carlo(source_locs, measurements_list, localizer_params):
+    
+    # results dict
+    results = {"path_detected": False,
+               "theta": float('nan'),
+               "theta_hat": float('nan'),}
+    
     # instantiate localizer
     l = Localizer(**localizer_params)
 
@@ -175,9 +257,9 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
     idx1 = np.argmin(source_locs[:,1])
     idx2 = np.argmax(source_locs[:,1])
     theta = get_bearing([source_locs[idx1,1], source_locs[idx2,1]], [-source_locs[idx1,0], -source_locs[idx2,0]])
+    results["theta"] = theta
 
     # build hypergraph
-    path_detected = False
     for i, measurement_set in enumerate(measurements_list):
         successful = l.set_measurements(measurement_set, **set_measurement_params)
 
@@ -186,31 +268,18 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
             continue
         else:
             # we've detected some portion of the path
-            path_detected = True
-            
+            #path_detected = True
+            results["path_detected"] = True
+
             # associate/localize
-            assoc, locs_est = l.associate_and_localize(method='partition', last_step=False)
+            assoc, locs_est = l.associate_and_localize(method='partition', reduce_dups=False, last_step=False)
 
             if i == 0:
                 locs_ests = locs_est
             else:
                 locs_ests = np.append(locs_ests, locs_est, axis=0)
 
-    if path_detected:
-        # # make point vectors
-        # x = locs_ests[:, [1]]
-        # y = -locs_ests[:,0]
-
-        # # get endpoints of a regression on the
-        # # estimated locations
-        # reg = LinearRegression().fit(x,y)
-        
-        # # get theta_hat
-        # # x_ends = np.asarray([x[0], x[-1]])
-        # x_ends = np.asarray([[np.min(x)], [np.max(x)]])
-        # y_ends = reg.predict(x_ends)
-        # theta_hat = get_bearing(x_ends.squeeze(), y_ends)
-        
+    if results["path_detected"]:
         # make point vectors
         x = locs_ests[:, [1]]
         y = -locs_ests[:,0]
@@ -222,64 +291,86 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
         x_ends = np.asarray([[np.min(x)], [np.max(x)]])
         y_ends = pcr.predict(x_ends)
         theta_hat = get_bearing(x_ends.squeeze(), y_ends)
+        results["theta_hat"] = theta_hat
 
-        return path_detected, theta, theta_hat
-    return path_detected, float('nan'), float('nan')
+    return results
 
 def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_measurement_params, data_gen_params):
     
     assert data_gen_params['beam_width'] == 0, "beam width must be 0 for monte carlo simulations"
 
-    columns = ["k", "consistency_thresh", "method_thresh", "prune", "max_time_offset", "std", "success_rate", "theta_error"]
+    columns = ["k", "consistency_thresh", "method_thresh", "prune", "max_time_offset", "std", "success_rate", "theta", "theta_hat"]
     df = pd.DataFrame(columns=columns)
 
-    for max_time_offset in max_time_offset_list:
-        for std in std_list:
+    # load map
+    Image.MAX_IMAGE_PIXELS = 729744000
+    bathym = Image.open(os.path.join(config['dataset']['data_directory'], "mikesbathym.tif"))
+    map_origin = config['TOSSIT']['map_origin']
+    dy = config['TOSSIT']['dy']
+    dx = config['TOSSIT']['dx']
+    min_x = config['scaling']['min_x']
+    max_x = config['scaling']['max_x']
+    min_y = config['scaling']['min_y']
+    max_y = config['scaling']['max_y']
+
+    for std in std_list:
+
+        # change consistency threshold based on measurement variance
+        localizer_params_final = localizer_params.copy()
+        localizer_params_final['consistency_thresh'] = localizer_params_final['consistency_thresh'][std]
+
+        for max_time_offset in max_time_offset_list:
             if args.background:
                 print(f'working on -- max_time_offset: {max_time_offset}, std: {std} m...', flush=True)
             
-            # keep track of theta
-            theta_list = []
-
-            # keep track of theta_hat
-            theta_hat_list = []
-
-            # keep track of successes
-            success_list = []
-
             # generate data
             source_locs_list = []
             measurements_set_list = []
             for _ in range(n):
-                # generate data
                 while True:
                     source_locs, measurements_list = generate_trajectory(measurement_stats=(0, std ** 2), max_channel_offset=max_time_offset, **data_gen_params)
-                    if all([abs(nested_list_max(l)) <= config['scaling']['max_r'] for l in measurements_list]):
+                    if all([abs(nested_list_max(l)) <= config['scaling']['max_r'] for l in measurements_list]) \
+                       and is_in_bay(source_locs, bathym, map_origin, dx, dy):
                         break
                 source_locs_list.append(source_locs)
                 measurements_set_list.append(measurements_list)
             
-            with Pool(processes=100) as pool:
-                results = pool.starmap(monte_carlo, tqdm(zip(source_locs_list, measurements_set_list, itertools.repeat(localizer_params)), total=n, disable=args.background, postfix={'max_time_offset' : max_time_offset, 'std' : std}))
+            # delayed for loop using dask
+            results = []
+            for i in range(n):
+                res = dask.delayed(monte_carlo)(source_locs_list[i],
+                                                measurements_set_list[i],
+                                                localizer_params_final)
+                results.append(res)
+
+            # parallelize MC
+            results = client.compute(results)
+            if not args.background:
+                progress(results)
+            results = client.gather(results)
+
+            #with Pool(processes=100) as pool:
+            #    results = pool.starmap(monte_carlo, tqdm(zip(source_locs_list, measurements_set_list, itertools.repeat(localizer_params)), total=n, disable=args.background, postfix={'max_time_offset' : max_time_offset, 'std' : std}))
 
             # save values
-            for result_set in results:
-                success_list.append(result_set[0])
-                theta_list.append(result_set[1])
-                theta_hat_list.append(result_set[2])
-            success_list = np.asarray(success_list)
-            theta_list = np.asarray(theta_list)
-            theta_hat_list = np.asarray(theta_hat_list)
+            theta_list = []
+            theta_hat_list = []
+            success_list = []
+            for result in results:
+                success_list.append(result["path_detected"])
+                theta_list.append(result["theta"])
+                theta_hat_list.append(result["theta_hat"])
             
             df = pd.concat([df, pd.DataFrame({
-                "k" : [localizer_params["k"] for _ in range(n)],
-                "consistency_thresh" : [localizer_params["consistency_thresh"] for _ in range(n)],
-                "method_thresh" : [localizer_params["multilat"].method_thresh for _ in range(n)],
-                "prune" : [localizer_params["prune"] for _ in range(n)],
+                "k" : [localizer_params_final["k"] for _ in range(n)],
+                "consistency_thresh" : [localizer_params_final["consistency_thresh"] for _ in range(n)],
+                "method_thresh" : [localizer_params_final["multilat"].method_thresh for _ in range(n)],
+                "prune" : [localizer_params_final["prune"] for _ in range(n)],
                 "max_time_offset" : [max_time_offset for _ in range(n)],
                 "std" : [std for _ in range(n)],
-                "success_rate" : success_list.tolist(),
-                "theta_error" : bearing_error(theta_list, theta_hat_list).tolist(),
+                "success_rate" : success_list,
+                "theta" : theta_list,
+                "theta_hat" : theta_hat_list,
             })])
 
     return df
@@ -287,7 +378,7 @@ def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_mea
 if __name__ == "__main__":
 
     # path for results CSV
-    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder", "path_finder_sim_results_in_sensors.csv")
+    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder", "path_finder_sim_results.csv")
     fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder")
 
     # set up results directory
@@ -299,18 +390,22 @@ if __name__ == "__main__":
 
     if args.simulate:
         
+        # dask setup
+        cluster = LocalCluster(n_workers=100, processes=True)
+        client = Client(cluster)
+
         # random number generators
         rng1 = np.random.default_rng(12345)
         rng2 = np.random.default_rng(54321)
 
         # parameters
-        localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=float('inf'), rng=rng1), consistency_thresh=3500, prune=False)
+        localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=float('inf'), rng=rng1), consistency_thresh={0: 2, 250: 1500, 500: 2500, 750: 3500, 1000: 3500}, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
-        data_gen_params = dict(rng=rng2, num_points=8, beam_width=0, timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, in_sensors=True)
+        data_gen_params = dict(rng=rng2, num_points=8, beam_width=0, timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, in_sensors=False)
 
-        df = monte_carlo_sim(n=150,
+        df = monte_carlo_sim(n=300,
                              max_time_offset_list=[0, 10],
-                             std_list=[0, 250, 500, 750, 1000], 
+                             std_list=[0, 250, 500, 750, 1000],
                              localizer_params=localizer_params,
                              set_measurement_params=set_measurement_params,
                              data_gen_params=data_gen_params)
@@ -331,6 +426,7 @@ if __name__ == "__main__":
 
     # set of variances tested
     std_list = sorted(list(set(df['std'])))
+    max_time_offset_list = sorted(list(set(df['max_time_offset'])))
 
     # make variance integer if possible
     def intify(x):
@@ -339,9 +435,10 @@ if __name__ == "__main__":
         else:
             return str(np.around(x, 2))
 
-    figs = [plt.figure() for _ in range(1)]
+    figs = [plt.figure() for _ in range(2)]
     axs = [fig.gca() for fig in figs]
 
+    df["theta_error"] = bearing_error(df["theta"], df["theta_hat"]).squeeze().tolist()
     sns.boxplot(x=df['std'], 
                 y=df['theta_error'], 
                 hue=df['max_time_offset'], 
@@ -359,11 +456,45 @@ if __name__ == "__main__":
     # sns.stripplot(data=df, ax=axs[0], x="std", y="theta_error", hue="max_time_offset", palette=sns.color_palette("tab10"), dodge=True)
     # axs[0].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
 
-    for ax in axs:
+    theta_err_dict = dict()
+    vals = np.zeros((len(std_list), len(max_time_offset_list)))
+    annot = np.zeros((len(std_list), len(max_time_offset_list)))
+    for i, std in enumerate(std_list):
+        for j, toff in enumerate(max_time_offset_list):
+        
+            d = df[(df["std"] == std) & (df["max_time_offset"] == toff)]
+
+            # get error for category
+            err = d["theta_error"]
+            
+            # calculate IQR
+            q1 = np.percentile(err, 25)
+            q3 = np.percentile(err, 75)
+            IQR = q3 - q1
+
+            # get
+            vals[i, j] = np.percentile(err[err > 1.5*IQR], 90)
+            annot[i, j] = len(err[err > 1.5*IQR]) / len(err) 
+
+    sns.heatmap(vals,
+                annot=annot,
+                xticklabels=max_time_offset_list,
+                yticklabels=std_list,
+                cbar_kws={'label': '90th Percentile Outliers'},
+                ax=axs[1])
+    axs[1].set_xlabel("Max Time Offset [s]")
+    axs[1].set_ylabel("Measurement Standard Deviation [m]")
+    axs[1].invert_yaxis()
+
+
+    for i, ax in enumerate(axs):
+        if i == 1:
+            continue
         ax.grid()
 
     if args.save_figs:
         figs[0].savefig(os.path.join(fig_path, "theta_error.png"))
+        figs[1].savefig(os.path.join(fig_path, "outlier_analysis.png"))
 
     # make table of means and stds
     dff = df.groupby(by=['std', 'max_time_offset']).agg({'theta_error' : ['mean', 'std']})
