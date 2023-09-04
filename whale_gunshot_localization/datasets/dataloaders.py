@@ -372,7 +372,7 @@ class SimDataRangeClassify(data.Dataset):
         map from data index to TOSSIT to take data from 
     """
 
-    def __init__(self, split, transform=None, squeeze=False, track_TOSSIT=False):
+    def __init__(self, split, transform=None, squeeze=False, sensors=None):
         """
         Construct attributes and grab reference to data file
 
@@ -384,8 +384,6 @@ class SimDataRangeClassify(data.Dataset):
             desired data transformations
         squeeze : bool
             whether or not to eliminate the singleton channel dimension 
-        track_TOSSIT : bool
-            whether or not we use deterministic TOSSIT selection for each data example
         """
 
         super(SimDataRangeClassify, self).__init__()
@@ -404,14 +402,8 @@ class SimDataRangeClassify(data.Dataset):
         self.max_r = config['scaling']['max_r']
 
         # get imsize
-        self.num_TOSSITs = self.data.shape[1]
+        self.sensors = np.arange(self.data.shape[1]) if sensors is None else sensors
         self.size = to_spect(self.data[0]).shape[2:]
-
-        self.track_TOSSIT = track_TOSSIT
-        if self.track_TOSSIT:
-            self.TOSSIT_LUT = np.random.choice(np.arange(self.num_TOSSITs), size=(self.__len__(),))
-        else:
-            self.TOSSIT_LUT = None
 
         self.transform = transform
         self.squeeze = squeeze
@@ -420,7 +412,7 @@ class SimDataRangeClassify(data.Dataset):
 
         # get data or noise randomly
         if np.random.choice([0, 1]):
-            t_ind = self.TOSSIT_LUT[idx] if self.track_TOSSIT else np.random.randint(low=0, high=self.num_TOSSITs)
+            t_ind = np.random.choice(self.sensors)
             inputs = self.data[idx,[t_ind]]
             target_c = self._from_numpy(np.asarray([1]))
             target_r = self._from_numpy(self.range_labels[[idx],t_ind]) / self.max_r
