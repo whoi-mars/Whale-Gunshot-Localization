@@ -18,8 +18,10 @@ from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 parser = argparse.ArgumentParser(description="Collect examples randomly from experimental data to serve as noise-only examples for training.")
 parser.add_argument('-n', '--number', type=int, default=10000,
                     help='number of examples to collect (default: 10000')
-parser.add_argument('-fs', '--sample_rate', type=int, default=12000,
-                    help='desired sample rate at which to save the collected examples (default: 12000 Hz)')
+parser.add_argument('-fsmat', '--sample_rate_matlab', type=int, default=12000,
+                    help='desired sample rate for MATLAB data simulation at which to save the collected examples (default: 12000 Hz)')
+parser.add_argument('-fspy', '--sample_rate_python', type=int, default=600,
+                    help='desired sample rate for NN training at which to save the collected examples (default: 600 Hz)')
 parser.add_argument('-T', '--duration', type=float, default=6,
                     help='desired signal duration for each collected example (default: 6 s)')
 parser.add_argument('-s', '--save_name', type=str, default='ccb_noise',
@@ -51,7 +53,7 @@ def read_audio_section(wav_path, start_time, end_time, sr):
 
     return wav
 
-def collect_noise(n, fs_target, T_target):
+def collect_noise(n, fs_target_py, fs_target_mat, T_target):
     """
     Collect noise examples by randomly collecting 6-second examples from the data.
 
@@ -81,8 +83,9 @@ def collect_noise(n, fs_target, T_target):
     wav_paths = [pair[0] for pair in all_dirs if pair[1] == max_depth]
 
     # to store noise signals
-    X = np.zeros((n, fs_target*T_target))
-    
+    X_mat = np.zeros((n, fs_target_mat*T_target))
+    X_py = np.zeros((n, fs_target_py*T_target))
+
     files_map = dict()
     for i in tqdm(range(n)):
         
@@ -107,22 +110,24 @@ def collect_noise(n, fs_target, T_target):
         wav = wav - wav.mean()
         
         # downsample and save
-        wav = resample_poly(wav, fs_target, f_samplerate)
+        wav_mat = resample_poly(wav, fs_target_mat, f_samplerate)
+        wav_py = resample_poly(wav, fs_target_py, f_samplerate)
 
-        X[i,:] = wav
+        X_mat[i,:] = wav_mat
+        X_py[i,:] = wav_py
 
     # save as MAT file
-    mdict = {u'noise_from_data': X.T, u'fs': float(fs_target)}
+    mdict = {u'noise_from_data': X_mat.T, u'fs': float(fs_target_mat)}
     hdf5storage.savemat(os.path.join(config['dataset']['data_directory'], f"{args.save_name}.mat"), mdict, format="7.3")
 
     # mean-center and L2 norm for h5 noise
-    X = X - X.mean(axis=1, keepdims=True)
-    X = X / np.sqrt(np.sum(X ** 2, axis=1, keepdims=True))
+    X_py = X_py - X_py.mean(axis=1, keepdims=True)
+    X_py = X_py / np.sqrt(np.sum(X_py ** 2, axis=1, keepdims=True))
 
     with h5py.File(os.path.join(config['dataset']['data_directory'], f"{args.save_name}.h5"), "w") as f:
-        f.create_dataset('data', data=X, shape=X.shape, chunks=(1, X.shape[1]))
-        f.create_dataset('fs', data=args.sample_rate, shape=(1,)) 
+        f.create_dataset('data', data=X_py, shape=X_py.shape, chunks=(1, X_py.shape[1]))
+        f.create_dataset('fs', data=fs_target_py, shape=(1,)) 
 
 if __name__ == "__main__":
 
-    collect_noise(n=args.number, fs_target=args.sample_rate, T_target=args.duration)
+    collect_noise(n=args.number, fs_target_py=args.sample_rate_python, fs_target_mat=args.sample_rate_matlab, T_target=args.duration)
