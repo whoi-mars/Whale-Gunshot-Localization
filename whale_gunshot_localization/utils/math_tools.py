@@ -120,3 +120,25 @@ def is_sparse_locs(locs, thresh=2000):
             if np.sqrt(((l1 - l2) ** 2).sum()) < thresh:
                 return False
     return True
+
+def is_dense_locs(locs, thresh=6000):
+    """
+    Checks if a group of locations is sufficiently dense such that
+    all pairs of locations are less than `thresh` meters apart.
+
+    Parameters
+    ----------
+    locs : array-like of shape N X 2
+        matrix of 2D locations
+
+    Returns
+    -------
+    : bool
+        Whether the locations are sufficiently spares (True) or not (False)
+    """
+    
+    if locs.shape[0] > 1:
+        for (l1, l2) in itertools.combinations(locs, 2):
+            if np.sqrt(((l1 - l2) ** 2).sum()) > thresh:
+                return False
+    return True
