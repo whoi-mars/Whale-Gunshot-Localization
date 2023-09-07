@@ -54,7 +54,7 @@ if args.scan:
     else:
         print("WARNING: Could not find GPU. Using CPU only.", flush=True)
 
-def plot_localization(locs_est, buffer=6000, title=None, bathym=None, dates=None, save=None, legend_transparency=0): 
+def plot_localization(locs_est, buffer=6000, title=None, dates=None, save=None, legend_transparency=0): 
     """
     Plot estimated source locations.
 
@@ -67,8 +67,6 @@ def plot_localization(locs_est, buffer=6000, title=None, bathym=None, dates=None
         how much to plot outside of the limits established in the config file
     title : str
         plot title
-    bathym : PIL.Image
-        geotiff of the bathymetry
     dates : List[datetime.datetime]
         list of dates associated with each sublist of location estiamtes
         in locs_est
@@ -321,9 +319,9 @@ if __name__ == '__main__':
     df["bin"] = pd.to_datetime(pd.cut(pd.DatetimeIndex(df["global_timestamp"]), bins=bins_dt, labels=bins_dt[:-1]))
     bin_grouped = df.groupby(by="bin")
 
-    # load map
-    Image.MAX_IMAGE_PIXELS = 729744000
-    bathym = Image.open(os.path.join(config['dataset']['data_directory'], "mikesbathym.tif"))
+    # # load map
+    # Image.MAX_IMAGE_PIXELS = 729744000
+    # bathym = Image.open(os.path.join(config['dataset']['data_directory'], "mikesbathym.tif"))
 
     # make plots
     all_locs_est = []
