@@ -24,9 +24,16 @@ parser.add_argument('--simulate', action='store_true',
                     help="simulate rather than use previous results if available (default: false)")
 parser.add_argument('--save_figs', action='store_true',
                     help="save figures (default: false)")
+parser.add_argument('--suppress_warnings', action='store_true',
+                    help="tell Python to suppress warnings")
 parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
 args = parser.parse_args()
+
+# suppress warnings
+if args.suppress_warnings:
+    import warnings
+    warnings.filterwarnings("ignore")
 
 # def plot_localization(locs_est, buffer=0, title=None, bathym=None, dates=None, save=None): 
 #     """
@@ -194,13 +201,13 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
         
         # generate arrays of source associations for the measurements
         source_associations.append(np.arange(num_sources))
-        
+    
     # delete from each source
     if num_delete:
-        num_delete = rng.choice([0, num_delete])
+        num_delete = rng.choice(num_delete)
         for s in range(num_sources): 
             distances = np.sqrt(((TOSSIT_locations - source_locs[s,:]) ** 2).sum(axis=1))
-            to_delete = np.argsort(distances)[::-1][:TOSSIT_locations.shape[0] - num_delete]
+            to_delete = np.argsort(distances)[::-1][:num_delete]
             for d in to_delete:
                 idx = np.argwhere(source_associations[d] == s)
                 range_measurements[d] = np.delete(range_measurements[d], idx)
@@ -250,14 +257,14 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
     if not successful:
         # check for FN
         if possible:
-            FN = True
+            #FN = True
             results["FN"] = True
         #return float('nan'), FN, FP, float('nan'), float('nan'), float('nan')
         return results
     else:
         # check for FP
         if not possible:
-            FP = True
+            #FP = True
             results["FP"] = True
             #return float('nan'), FN, FP, float('nan'), float('nan'), float('nan')
             return results
@@ -268,8 +275,8 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
 
     # if we predict too many sources return
     if locs_est.shape[0] > s_locs.shape[0]:
-        over_predict_sources = True
-        results["over_predict_sources"]
+        # over_predict_sources = True
+        results["over_predict_sources"] = True
         #return over_predict_sources, FN, FP, float('nan'), float('nan'), float('nan')
         return results
 
@@ -285,7 +292,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
     detected_sources = source_loc_idx_combs[np.argmin(errors_matrix)][:num_ests]
     measurements_flat = np.concatenate(measurements)
     TOSSIT_flat = np.concatenate(t_assocs)
-    localizer = MultilaterationOpt()
+    localizer = localizer_params['multilat']
     TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
     localizer.set_map({
         'TOSSIT_locations' : TOSSIT_locations,
@@ -332,6 +339,7 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
         # change consistency threshold based on measurement variance
         localizer_params_final = localizer_params.copy()
         localizer_params_final['consistency_thresh'] = localizer_params_final['consistency_thresh'][std]
+        localizer_params_final['multilat'] = localizer_params_final['multilat'][std]
         
         for num_sources in num_sources_list:
 
@@ -425,7 +433,7 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
 if __name__ == "__main__":
 
     # path for results CSV
-    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "data_assoc_and_loc", "data_association_and_localization_sim_results.csv")
+    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "data_assoc_and_loc", "data_association_and_localization_sim_results_whole_bay_d6.csv")
 
     ##########################################
     #          simulate/load results         #
@@ -444,9 +452,9 @@ if __name__ == "__main__":
         rng2 = np.random.default_rng(1524)
 
         # parameters for localizer and data_generator
-        localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=float('inf'), rng=rng1), consistency_thresh={0: 2, 250: 500, 500: 1500, 750: 2000, 1000: 2500}, dup_thresh=3000, prune=False)
+        localizer_params = dict(k=4, multilat={i : MultilaterationOpt(method_thresh=0.9, rng=rng1) for i in [0, 250, 500, 750, 1000]}, consistency_thresh={0: 2, 250: 500, 500: 1500, 750: 2000, 1000: 2500}, dup_thresh=3000, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
-        data_gen_params = dict(num_delete=6, rng=rng2, in_sensors=True)
+        data_gen_params = dict(num_delete=6, rng=rng2, in_sensors=False)
 
         # run MC
         df = run_monte_carlo(n=300,
@@ -552,59 +560,62 @@ if __name__ == "__main__":
     #--------- outlier analysis --------#
     #-----------------------------------#
 
-    vals = np.zeros((len(std_list_all), num_sources_max - num_sources_min + 1))
-    vals_best = np.zeros(vals.shape)
-    anno = np.zeros(vals.shape)
-    annob = np.zeros(vals.shape)
+    # vals = np.zeros((len(std_list_all), num_sources_max - num_sources_min + 1))
+    # vals_best = np.zeros(vals.shape)
+    # anno = np.zeros(vals.shape)
+    # annob = np.zeros(vals.shape)
     for i, std in enumerate(std_list_all):
         for j, n in enumerate(range(num_sources_min, num_sources_max + 1)):
-            q1 = np.percentile(location_error_dict[(std, n)], 25)
-            q3 = np.percentile(location_error_dict[(std, n)], 75)
-            q1b = np.percentile(best_location_error_dict[(std, n)], 25)
-            q3b = np.percentile(best_location_error_dict[(std, n)], 75)
-            IQR = q3 - q1
-            IQRb = q3b - q1b
+            # q1 = np.percentile(location_error_dict[(std, n)], 25)
+            # q3 = np.percentile(location_error_dict[(std, n)], 75)
+            # q1b = np.percentile(best_location_error_dict[(std, n)], 25)
+            # q3b = np.percentile(best_location_error_dict[(std, n)], 75)
+            # IQR = q3 - q1
+            # IQRb = q3b - q1b
 
             location_error_dict[(std, n)] = np.asarray(location_error_dict[(std, n)])
             best_location_error_dict[(std, n)] = np.asarray(best_location_error_dict[(std, n)])
-            val = np.percentile(location_error_dict[(std, n)][location_error_dict[(std, n)] > 1.5*IQR], 90)
-            val_best = np.percentile(best_location_error_dict[(std, n)][best_location_error_dict[(std, n)] > 1.5*IQRb], 90)
-            vals[i,j] = val
-            vals_best[i,j] = val_best
+            # val = np.percentile(location_error_dict[(std, n)][location_error_dict[(std, n)] > 1.5*IQR], 90)
+            # val_best = np.percentile(best_location_error_dict[(std, n)][best_location_error_dict[(std, n)] > 1.5*IQRb], 90)
+            # vals[i,j] = val
+            # vals_best[i,j] = val_best
 
-            anno[i,j] = len(location_error_dict[(std, n)][location_error_dict[(std, n)] > 1.5*IQR]) / len(location_error_dict[(std, n)])
-            annob[i,j] = len(best_location_error_dict[(std, n)][best_location_error_dict[(std, n)] > 1.5*IQRb]) / len(best_location_error_dict[(std, n)])
+            # anno[i,j] = len(location_error_dict[(std, n)][location_error_dict[(std, n)] > 1.5*IQR]) / len(location_error_dict[(std, n)])
+            # annob[i,j] = len(best_location_error_dict[(std, n)][best_location_error_dict[(std, n)] > 1.5*IQRb]) / len(best_location_error_dict[(std, n)])
 
-    sns.heatmap(vals, 
-                annot=anno,
-                xticklabels=range(num_sources_min, num_sources_max + 1),
-                yticklabels=std_list_all,
-                cbar_kws={'label': '90th Percentile Outliers'}, 
-                ax=axs[2])
-    axs[2].set_xlabel("Number of Sources")
-    axs[2].set_ylabel("Measurement Standard Deviation [m]")
-    axs[2].set_title("Outlier Analysis (Unsupervised)")
-    #axs[2].set_title("Outlier Analysis (Unsupervised, N/2 Measurements)")
-    axs[2].invert_yaxis()
+            print(f"n = {n}, std = {std}: {np.percentile(location_error_dict[(std,n)][~np.isnan(location_error_dict[(std,n)])], 95)}")
+            print(f"BEST -- n = {n}, std = {std}: {np.percentile(best_location_error_dict[(std,n)], 95)}")
+
+    # sns.heatmap(vals, 
+    #             annot=anno,
+    #             xticklabels=range(num_sources_min, num_sources_max + 1),
+    #             yticklabels=std_list_all,
+    #             cbar_kws={'label': '90th Percentile Outliers'}, 
+    #             ax=axs[2])
+    # axs[2].set_xlabel("Number of Sources")
+    # axs[2].set_ylabel("Measurement Standard Deviation [m]")
+    # axs[2].set_title("Outlier Analysis (Unsupervised)")
+    # #axs[2].set_title("Outlier Analysis (Unsupervised, N/2 Measurements)")
+    # axs[2].invert_yaxis()
 
 
-    sns.heatmap(vals_best, 
-                annot=annob,
-                xticklabels=range(num_sources_min, num_sources_max + 1),
-                yticklabels=std_list_all,
-                cbar_kws={'label': '90th Perentile Outliers'}, 
-                ax=axs[3])
-    axs[3].set_xlabel("Number of Sources")
-    axs[3].set_ylabel("Measurement Standard Deviation [m]")
-    axs[3].set_title("Outlier Analysis (Ideal)")
-    #axs[3].set_title("Outlier Analysis (Ideal, N/2 Measurements)")
-    axs[3].invert_yaxis()
+    # sns.heatmap(vals_best, 
+    #             annot=annob,
+    #             xticklabels=range(num_sources_min, num_sources_max + 1),
+    #             yticklabels=std_list_all,
+    #             cbar_kws={'label': '90th Perentile Outliers'}, 
+    #             ax=axs[3])
+    # axs[3].set_xlabel("Number of Sources")
+    # axs[3].set_ylabel("Measurement Standard Deviation [m]")
+    # axs[3].set_title("Outlier Analysis (Ideal)")
+    # #axs[3].set_title("Outlier Analysis (Ideal, N/2 Measurements)")
+    # axs[3].invert_yaxis()
 
     #-----------------------------------#
     #-------- error districutions ------#
     #-----------------------------------#
 
-    figg, axx = plt.subplots(vals.shape[0], vals.shape[1], figsize=(26,26))
+    figg, axx = plt.subplots(len(std_list_all), num_sources_max - num_sources_min + 1, figsize=(26,26))
     if not isinstance(axx, np.ndarray):
         axx = np.asarray([[axx]])
     elif len(axx.shape) < 2:
@@ -614,7 +625,7 @@ if __name__ == "__main__":
         for j, n in enumerate(range(num_sources_min, num_sources_max + 1)):
             #_,bins,_ = axx[i,j].hist(location_error_dict[(std,n)] / 1000, alpha=0.5, bins=150, label='unsupervised (N/2 measurements)')
             #axx[i,j].hist(best_location_error_dict[(std,n)] / 1000, alpha=0.5, bins=bins, label='ideal (N/2 measurements)')
-            _,bins,_ = axx[i,j].hist(location_error_dict[(std,n)] / 1000, alpha=0.5, bins=150, label='unsupervised')
+            _,bins,_ = axx[i,j].hist(location_error_dict[(std,n)] / 1000, alpha=0.5, bins=300, label='unsupervised')
             axx[i,j].hist(best_location_error_dict[(std,n)] / 1000, alpha=0.5, bins=bins, label='ideal')
             axx[i,j].set_title(f"n={n}, $\sigma$={std} m", fontsize=22)
             axx[i,j].tick_params(axis='x', labelsize=16)
@@ -641,30 +652,9 @@ if __name__ == "__main__":
         fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments","results", "data_assoc_and_loc")
         figs[0].savefig(os.path.join(fig_path, "unsupervised_location_error.png"))
         figs[1].savefig(os.path.join(fig_path, "best_location_error.png"))
-        figs[2].savefig(os.path.join(fig_path, "unsupervised_outliers.png"))
-        figs[3].savefig(os.path.join(fig_path, "best_outliers.png"))
+        # figs[2].savefig(os.path.join(fig_path, "unsupervised_outliers.png"))
+        # figs[3].savefig(os.path.join(fig_path, "best_outliers.png"))
         figg.savefig(os.path.join(fig_path, "hists.png"))
 
     # results table
     print(pd.concat([dff, loc_cols], axis=1))
-    
-    # # get number of outliers
-    # location_error_list = np.asarray(location_error_list)
-    # best_location_error_list = np.asarray(best_location_error_list)
-
-    # q3 = np.percentile(location_error_list, 75)
-    # q1 = np.percentile(location_error_list, 25)
-    # q3b = np.percentile(best_location_error_list, 75)
-    # q1b = np.percentile(best_location_error_list, 25)
-    
-    # IQR = q3 - q1
-    # IQRb = q3b - q1b
-
-    # print()
-    # print("-----------------------------------------------")
-    # print("% Outliers: ", np.around(100 * len(location_error_list[location_error_list >= 1.5*IQR])/len(location_error_list), 2))
-    # print("% Outliers Best: ", np.around(100 * len(best_location_error_list[best_location_error_list >= 1.5*IQRb])/len(best_location_error_list), 2))
-    # print("-----------------------------------------------")
-    # print("90th Percentile Outliers: ", np.around(np.percentile(location_error_list[location_error_list >= 1.5*IQR],90)), " m")
-    # print("90th Percentile Outliers Best: ", np.around(np.percentile(best_location_error_list[best_location_error_list >= 1.5*IQRb],90)), " m")
-    # print("-----------------------------------------------")
