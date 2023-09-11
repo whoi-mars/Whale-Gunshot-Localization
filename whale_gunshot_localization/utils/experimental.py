@@ -185,30 +185,75 @@ class MultilaterationOpt(MultilaterationBase):
 
         H = (-2 / N)*(np.einsum('ij,kj->jik', p_i, p_i).sum(axis=0)) + (2*c @ c.T)
         
-        if np.linalg.matrix_rank(H) < 2:
-            cost, loc = self._opt(ranges, sensors_idx)
-            return cost, loc
-        else:
-            # check if approximation holds to make H matrix.
-            # if not, use gradient-based localization
-            f = a + B @ c + 2*c @ c.T @ c
-        
-            q = -np.linalg.inv(H) @ f
+        f = a + B @ c + 2*c @ c.T @ c
 
-            D = B + 2*c @ c.T + (c.T @ c) * np.eye(2)
-            H_hat = D - (q.T @ q)*np.eye(2)
-            
-            dist = math_tools.matrix_similarity(H, H_hat)
-            
-            if dist < self.method_thresh:
+        if np.linalg.matrix_rank(H) < 2:
+            # the try/except here accounts for degenerate configurations
+            try:
+                # calculate H'
+                Hp = H[0,0] - H[1,0]
+
+                # calculate h'
+                hp = -(H[0,1] - H[1,1])
+
+                # calculate f'
+                fp = -(f[0,0] - f[1,0])
+
+                # calculate H^{f}_{k}
+                Hfk = fp
+
+                # calculate H^{h}_{k}
+                Hhk = hp
+
+                # calculate q^{T}q
+                qTq = (-(1 / N)*(p_i*p_i).sum().squeeze() + (1 / N)*(ranges ** 2).sum().squeeze() + (c.T @ c).squeeze())
+
+                # calculate qn1 and qn2
+                aa = (Hhk ** 2) + (Hp ** 2)
+                bb = (2*Hfk*Hhk)
+                cc = ((Hfk ** 2) - ((Hp ** 2)*qTq))
+                qn1 = (-bb + np.sqrt((bb ** 2) - 4*aa*cc)) / (2*aa)
+                qn2 = (-bb - np.sqrt((bb ** 2) - 4*aa*cc)) / (2*aa)
+                qn = np.asarray([[qn1, qn2]])
+
+                # calculate qk
+                qk = (Hfk / Hp) + ((Hhk / Hp)*qn)
+
+                # calculate q
+                q = np.concatenate((qk, qn), axis=0)
+
+                # choose q solution with the lowest cost
+                loc = (q + c)
+                min_idx = 0
+                min_cost = float('inf')
+                for i in range(2):
+                    l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - loc[0,i]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - loc[1,i]) ** 2)
+                    cost = 0.5*np.sum((l2.squeeze() - ranges) ** 2)
+
+                    if cost < min_cost:
+                        min_cost = cost
+                        min_idx = i
+
+                q = q[:,[min_idx]]
+            except:
                 cost, loc = self._opt(ranges, sensors_idx)
                 return cost, loc
-
-            # calculate cost for closed form method
+                
+        else:
+            q = -np.linalg.inv(H) @ f
             loc = (q + c).squeeze()
             l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - loc[0]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - loc[1]) ** 2)
-            cost = 0.5*np.sum((l2.squeeze() - ranges) ** 2)
-            return cost, loc 
+            min_cost = 0.5*np.sum((l2.squeeze() - ranges) ** 2)
+        
+        D = B + 2*c @ c.T + (c.T @ c) * np.eye(2)
+        H_hat = D - (q.T @ q)*np.eye(2)
+
+        dist = math_tools.matrix_similarity(H, H_hat)
+        if dist < self.method_thresh:
+            cost, loc = self._opt(ranges, sensors_idx)
+            return cost, loc
+        
+        return min_cost, (q + c).squeeze()
 
 class MultilaterationGrid(MultilaterationBase):
     """
