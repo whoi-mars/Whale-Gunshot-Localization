@@ -143,9 +143,8 @@ def is_dense_locs(locs, thresh=6000, n=3):
     : bool
         Whether the locations are sufficiently dense (True) or not (False)
     """
-    
     for loc in locs:
         distances = np.sqrt(((locs - loc) ** 2).sum(axis=1))
-        if (distances <= thresh).sum() < n:
+        if (distances <= thresh).sum() < min(n + 1, len(locs)):
             return False
     return True
