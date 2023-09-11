@@ -433,7 +433,7 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
 if __name__ == "__main__":
 
     # path for results CSV
-    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "data_assoc_and_loc", "data_association_and_localization_sim_results_whole_bay_d6.csv")
+    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "data_assoc_and_loc", "data_association_and_localization_sim_results.csv")
 
     ##########################################
     #          simulate/load results         #
@@ -452,13 +452,13 @@ if __name__ == "__main__":
         rng2 = np.random.default_rng(1524)
 
         # parameters for localizer and data_generator
-        localizer_params = dict(k=4, multilat={i : MultilaterationOpt(method_thresh=0.9, rng=rng1) for i in [0, 250, 500, 750, 1000]}, consistency_thresh={0: 2, 250: 500, 500: 1500, 750: 2000, 1000: 2500}, dup_thresh=3000, prune=False)
+        localizer_params = dict(k=4, multilat={i : MultilaterationOpt(method_thresh=0.90 if i == 0 else float('inf'), rng=rng1) for i in [1000]}, consistency_thresh={0: 2, 250: 500, 500: 1500, 750: 2000, 1000: 2500}, dup_thresh=3000, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
-        data_gen_params = dict(num_delete=6, rng=rng2, in_sensors=False)
+        data_gen_params = dict(num_delete=0, rng=rng2, in_sensors=False)
 
         # run MC
         df = run_monte_carlo(n=300,
-                             std_list=[0, 250, 500, 750, 1000],
+                             std_list=[1000],
                              num_sources_list=range(1,6),
                              sparse_distance=10,
                              localizer_params=localizer_params,
@@ -483,7 +483,7 @@ if __name__ == "__main__":
     num_sources_min = df['num_sources'].min()
 
     # get figs and axes
-    figs = [plt.figure() for _ in range(7)]
+    figs = [plt.figure() for _ in range(4)]
     axs = [fig.gca() for fig in figs]
 
     # make variance integer if possible
@@ -534,10 +534,8 @@ if __name__ == "__main__":
                 ax=axs[0])
     axs[0].legend(title='Standard Deviation [m]')
     axs[0].set_title("Unsupervised Localization Error")
-    #axs[0].set_title("Unsupervised Localization Error (N/2 Measuements)")
     axs[0].set_xlabel("Number of Sources")
     axs[0].set_ylabel("Error [m]")
-    #axs[0].set_ylim([0, 8000])
     axs[0].set_axisbelow(True)
 
     sns.boxplot(x=df_loc['num_sources'], 
@@ -550,70 +548,13 @@ if __name__ == "__main__":
                 ax=axs[1])
     axs[1].legend(title='Standard Deviation [m]')
     axs[1].set_title("Ideal Localization Error")
-    #axs[1].set_title("Ideal Localization Error (N/2 Measurements)")
     axs[1].set_xlabel("Number of Sources")
     axs[1].set_ylabel("Error [m]")
-    #axs[1].set_ylim([0, 8000])
     axs[1].set_axisbelow(True)
 
-    #-----------------------------------#
-    #--------- outlier analysis --------#
-    #-----------------------------------#
-
-    # vals = np.zeros((len(std_list_all), num_sources_max - num_sources_min + 1))
-    # vals_best = np.zeros(vals.shape)
-    # anno = np.zeros(vals.shape)
-    # annob = np.zeros(vals.shape)
-    for i, std in enumerate(std_list_all):
-        for j, n in enumerate(range(num_sources_min, num_sources_max + 1)):
-            # q1 = np.percentile(location_error_dict[(std, n)], 25)
-            # q3 = np.percentile(location_error_dict[(std, n)], 75)
-            # q1b = np.percentile(best_location_error_dict[(std, n)], 25)
-            # q3b = np.percentile(best_location_error_dict[(std, n)], 75)
-            # IQR = q3 - q1
-            # IQRb = q3b - q1b
-
-            location_error_dict[(std, n)] = np.asarray(location_error_dict[(std, n)])
-            best_location_error_dict[(std, n)] = np.asarray(best_location_error_dict[(std, n)])
-            # val = np.percentile(location_error_dict[(std, n)][location_error_dict[(std, n)] > 1.5*IQR], 90)
-            # val_best = np.percentile(best_location_error_dict[(std, n)][best_location_error_dict[(std, n)] > 1.5*IQRb], 90)
-            # vals[i,j] = val
-            # vals_best[i,j] = val_best
-
-            # anno[i,j] = len(location_error_dict[(std, n)][location_error_dict[(std, n)] > 1.5*IQR]) / len(location_error_dict[(std, n)])
-            # annob[i,j] = len(best_location_error_dict[(std, n)][best_location_error_dict[(std, n)] > 1.5*IQRb]) / len(best_location_error_dict[(std, n)])
-
-            print(f"n = {n}, std = {std}: {np.percentile(location_error_dict[(std,n)][~np.isnan(location_error_dict[(std,n)])], 95)}")
-            print(f"BEST -- n = {n}, std = {std}: {np.percentile(best_location_error_dict[(std,n)], 95)}")
-
-    # sns.heatmap(vals, 
-    #             annot=anno,
-    #             xticklabels=range(num_sources_min, num_sources_max + 1),
-    #             yticklabels=std_list_all,
-    #             cbar_kws={'label': '90th Percentile Outliers'}, 
-    #             ax=axs[2])
-    # axs[2].set_xlabel("Number of Sources")
-    # axs[2].set_ylabel("Measurement Standard Deviation [m]")
-    # axs[2].set_title("Outlier Analysis (Unsupervised)")
-    # #axs[2].set_title("Outlier Analysis (Unsupervised, N/2 Measurements)")
-    # axs[2].invert_yaxis()
-
-
-    # sns.heatmap(vals_best, 
-    #             annot=annob,
-    #             xticklabels=range(num_sources_min, num_sources_max + 1),
-    #             yticklabels=std_list_all,
-    #             cbar_kws={'label': '90th Perentile Outliers'}, 
-    #             ax=axs[3])
-    # axs[3].set_xlabel("Number of Sources")
-    # axs[3].set_ylabel("Measurement Standard Deviation [m]")
-    # axs[3].set_title("Outlier Analysis (Ideal)")
-    # #axs[3].set_title("Outlier Analysis (Ideal, N/2 Measurements)")
-    # axs[3].invert_yaxis()
-
-    #-----------------------------------#
-    #-------- error districutions ------#
-    #-----------------------------------#
+    #---------------------------------------------------#
+    #-------- error distributions and percentiles ------#
+    #---------------------------------------------------#
 
     figg, axx = plt.subplots(len(std_list_all), num_sources_max - num_sources_min + 1, figsize=(26,26))
     if not isinstance(axx, np.ndarray):
@@ -621,10 +562,19 @@ if __name__ == "__main__":
     elif len(axx.shape) < 2:
         axx = np.asarray([axx])
 
+    unsupervised_per = np.zeros((len(std_list_all), len(range(num_sources_min, num_sources_max + 1))))
+    best_per = np.zeros((len(std_list_all), len(range(num_sources_min, num_sources_max + 1))))
     for i, std in enumerate(std_list_all):
         for j, n in enumerate(range(num_sources_min, num_sources_max + 1)):
-            #_,bins,_ = axx[i,j].hist(location_error_dict[(std,n)] / 1000, alpha=0.5, bins=150, label='unsupervised (N/2 measurements)')
-            #axx[i,j].hist(best_location_error_dict[(std,n)] / 1000, alpha=0.5, bins=bins, label='ideal (N/2 measurements)')
+           
+            location_error_dict[(std, n)] = np.asarray(location_error_dict[(std, n)])
+            best_location_error_dict[(std, n)] = np.asarray(best_location_error_dict[(std, n)])
+            unsupervised_per[i,j] = np.percentile(location_error_dict[(std,n)][~np.isnan(location_error_dict[(std,n)])], 95)
+            best_per[i,j] = np.percentile(best_location_error_dict[(std,n)], 95)
+
+            print(f"n = {n}, std = {std}: {np.percentile(location_error_dict[(std,n)][~np.isnan(location_error_dict[(std,n)])], 95)}")
+            print(f"BEST -- n = {n}, std = {std}: {np.percentile(best_location_error_dict[(std,n)], 95)}")
+            
             _,bins,_ = axx[i,j].hist(location_error_dict[(std,n)] / 1000, alpha=0.5, bins=300, label='unsupervised')
             axx[i,j].hist(best_location_error_dict[(std,n)] / 1000, alpha=0.5, bins=bins, label='ideal')
             axx[i,j].set_title(f"n={n}, $\sigma$={std} m", fontsize=22)
@@ -637,6 +587,26 @@ if __name__ == "__main__":
     figg.subplots_adjust(wspace=0.35, hspace=0.35)
     figg.text(0.5, 0.04, "Localization Error [km]", ha='center', va='center', fontsize=28)
     figg.text(0.05, 0.5, "Example Count", ha='center', va='center', rotation=90, fontsize=28)
+
+    sns.heatmap(unsupervised_per / 1000, 
+                xticklabels=range(num_sources_min, num_sources_max + 1),
+                yticklabels=std_list_all,
+                cbar_kws={'label': '95th Perentile Errors [km]'}, 
+                ax=axs[2])
+    axs[2].set_xlabel("Number of Sources")
+    axs[2].set_ylabel("Measurement Standard Deviation [m]")
+    axs[2].set_title("Unsupervised")
+    axs[2].invert_yaxis()
+
+    sns.heatmap(best_per / 1000, 
+                xticklabels=range(num_sources_min, num_sources_max + 1),
+                yticklabels=std_list_all,
+                cbar_kws={'label': '95th Perentile Errors [km]'}, 
+                ax=axs[3])
+    axs[3].set_xlabel("Number of Sources")
+    axs[3].set_ylabel("Measurement Standard Deviation [m]")
+    axs[3].set_title("Ideal")
+    axs[3].invert_yaxis()
 
     for i, ax in enumerate(axs):
         if i in [2, 3]:
@@ -652,8 +622,9 @@ if __name__ == "__main__":
         fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments","results", "data_assoc_and_loc")
         figs[0].savefig(os.path.join(fig_path, "unsupervised_location_error.png"))
         figs[1].savefig(os.path.join(fig_path, "best_location_error.png"))
-        # figs[2].savefig(os.path.join(fig_path, "unsupervised_outliers.png"))
-        # figs[3].savefig(os.path.join(fig_path, "best_outliers.png"))
+        figs[2].savefig(os.path.join(fig_path, "unsupervised_percentile_error.png"))
+        figs[3].savefig(os.path.join(fig_path, "best_percentile_error.png"))
+
         figg.savefig(os.path.join(fig_path, "hists.png"))
 
     # results table
