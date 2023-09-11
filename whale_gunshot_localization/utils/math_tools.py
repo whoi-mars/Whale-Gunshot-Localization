@@ -108,6 +108,8 @@ def is_sparse_locs(locs, thresh=2000):
     ----------
     locs : array-like of shape N X 2
         matrix of 2D locations
+    thresh : float
+        sparseness threshold
 
     Returns
     -------
@@ -121,24 +123,29 @@ def is_sparse_locs(locs, thresh=2000):
                 return False
     return True
 
-def is_dense_locs(locs, thresh=6000):
+def is_dense_locs(locs, thresh=6000, n=3):
     """
     Checks if a group of locations is sufficiently dense such that
-    all pairs of locations are less than `thresh` meters apart.
+    to every sensor, there are n others that are less than `thresh` 
+    meters apart.
 
     Parameters
     ----------
     locs : array-like of shape N X 2
         matrix of 2D locations
+    thresh : float
+        closeness threshold
+    n : int
+        number of locs each loc should be sufficiently close to
 
     Returns
     -------
     : bool
-        Whether the locations are sufficiently spares (True) or not (False)
+        Whether the locations are sufficiently dense (True) or not (False)
     """
     
-    if locs.shape[0] > 1:
-        for (l1, l2) in itertools.combinations(locs, 2):
-            if np.sqrt(((l1 - l2) ** 2).sum()) > thresh:
-                return False
+    for loc in locs:
+        distances = np.sqrt(((locs - loc) ** 2).sum(axis=1))
+        if (distances <= thresh).sum() < n:
+            return False
     return True
