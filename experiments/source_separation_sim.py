@@ -5,7 +5,6 @@ import copy
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 import dask
 from dask.distributed import Client, LocalCluster, progress
 from PIL import Image
@@ -14,7 +13,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from whale_gunshot_localization.utils.experimental import Localizer, MultilaterationOpt, MultilaterationGrid
+from whale_gunshot_localization.utils.experimental import Localizer, MultilaterationOpt
+import whale_gunshot_localization.sim_tools.sim_datagen as sim_datagen
+import whale_gunshot_localization.sim_tools.sim_data_checks as sim_data_checks
 import whale_gunshot_localization.utils.math_tools as math_tools
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 
@@ -35,195 +36,11 @@ if args.suppress_warnings:
     import warnings
     warnings.filterwarnings("ignore")
 
-# def plot_localization(locs_est, buffer=0, title=None, bathym=None, dates=None, save=None): 
-#     """
-#     Plot estimated source locations.
+def filter_oob_locs(locs, buffer=15000):
+    idx = np.where((config['scaling']['min_y'] - buffer <= locs[:,0]) & (locs[:,0] <= (config['scaling']['max_y'] + buffer)) & (config['scaling']['min_x'] - buffer <= locs[:,1]) & (locs[:,1] <= (config['scaling']['max_x'] + buffer)))[0]
+    return locs[idx,:], len(locs) - len(idx)
 
-#     Parameters
-#     ----------
-#     locs_est : List[np.array], with each subarray of shape N X 2
-#         list of lists of estimated locations where the first column stores the Y
-#         coordinate and the second stores the X coordinates
-#     buffer : float
-#         how much to plot outside of the limits established in the config file
-#     title : str
-#         plot title
-#     bathym : PIL.Image
-#         geotiff of the bathymetry
-#     dates : List[datetime.datetime]
-#         list of dates associated with each sublist of location estiamtes
-#         in locs_est
-#     save : str
-#         path at which to save the plot if desired
-#     """
-
-#     # format inputs
-#     if not isinstance(locs_est, list):
-#         locs_est = [locs_est]
-#     if not isinstance(dates, list):
-#         dates = [dates]
-#     # assert len(locs_est) == len(dates), "locs_est and dates lists must have a one-to-one correspondence"
-
-#     # random list of color for plotting
-#     rng = np.random.default_rng(1111)
-#     colors = [rng.uniform(0, 1, size=3) for _ in range(len(locs_est))]
-
-#     # load constants
-#     TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-#     min_x = config['scaling']['min_x']
-#     max_x = config['scaling']['max_x']
-#     min_y = config['scaling']['min_y']
-#     max_y = config['scaling']['max_y']
-#     map_origin = config['TOSSIT']['map_origin']
-#     dy = config['TOSSIT']['dy']
-#     dx = config['TOSSIT']['dx']
-
-#     # crop bathymetry appropriately 
-#     bathym = bathym.crop((round(map_origin[1] + (min_x/dx) - (buffer/dx)), 
-#                           round(map_origin[0] + (min_y/dy) - (buffer/dy)), 
-#                           round(map_origin[1] + (max_x/dx) + (buffer/dx)), 
-#                           round(map_origin[0] + (max_y/dy) + (buffer/dy))))
-
-#     fig, ax = plt.subplots(1, 1)
-#     ax.plot(TOSSIT_locations[:,1], TOSSIT_locations[:,0], '^', color="#21EE71", markersize=10, label='sensor', markeredgewidth=2)
-#     for i, l in enumerate(locs_est):
-#         ax.plot(l[:,1], l[:,0], 'x', color=colors[i], label=f'estimate ({dates[i]})' if dates[0] else 'estimate', markersize=6, markeredgewidth=2)
-#     if title is not None:
-#         ax.set_title(title)
-#     ax.set_xlabel("X [m]")
-#     ax.set_ylabel("Y [m]")
-#     ax.set_xlim([min_x-buffer, max_x+buffer])
-#     ax.set_ylim([min_y-buffer, max_y+buffer])
-#     ax.invert_yaxis()
-#     implot = ax.imshow(bathym, extent=(min_x - buffer, max_x + buffer, max_y + buffer, min_y - buffer))
-#     # ax.legend()
-    
-#     # save or show
-#     if save is not None:
-#         fig.savefig(save)
-#     else:
-#         fig.show()
-    
-#     # close figure
-#     plt.close(fig)
-
-def is_in_bay(source_locs, bathym, map_origin, dx, dy):
-    """
-    Check if source locations are in CCB.
-    
-    Parameters
-    ----------
-    source_locs : array-like[array-like]
-        matrix of generated source locations'
-    bathym : PIL.Image
-        geotiff of the bathymetry
-    map_origin : array-like of shape 1 X 2
-        pixels coordinates of the origin of the bathymetry map
-    dx : float
-        approximate change in meters when going in the X direction
-    dy : float
-        approximate change in meters when going in the Y direction
-    
-    Returns
-    -------
-    : bool
-        whether all source_locs are in water (True) or not (False)
-    """
-
-    for loc in source_locs:
-        # line cutting off locations on the open-ocean side of Provincetown
-        line1 = loc[0] - 0.88434446716*loc[1] < -38672.47
-        # line cutting off locations on the west side of the Cape Cod Canal
-        line2 = loc[0] - 0.84448322668*loc[1] > 19385.3 
-        pixel = bathym.getpixel((round(map_origin[1] + loc[1]/dx), round(map_origin[0] + loc[0]/dy)))
-        if pixel == 147 or line1 or line2:
-            return False
-    return True
-
-def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=False):
-    """
-    Generate some synthetic measurements to test with data association/localization algoritms.
-    
-    Parameters
-    ----------
-    num_sources : int
-        maximum number of sources
-    var : float
-        variance of Gaussian noise added to range measurements
-    num_delete : int
-        maximum number of measurements to hide/delete at each source
-        
-    Returns
-    -------
-    range_measurements : List[array-like]
-        each sublist contains range measurements and is associated with a particular TOSSIT
-    source_associations : List[array-like]
-        same shape as range_measurements. each sublist contains numbers which associate the
-        range_measurement in the corresponding spot in the data structure with a source.
-    TOSSIT_association : List[array-like]
-        same shape as range_measurements. each sublist contains numbers which associate the
-        range_measurement in the corresponding spot in the data structure with a TOSSIT.    
-    source_locs : array-like[array-like]
-        matrix of generated source locations
-    """ 
-    
-    # check inputs
-    assert num_sources > 0, "number of sources must be non-negative"
-    assert num_delete >= 0, "max signals to delete at each sensor must be non-negative"
-    
-    # get TOSSIT locations and extreme coordinate values
-    TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-    if in_sensors:
-        min_x = np.min(TOSSIT_locations[:,1])
-        max_x = np.max(TOSSIT_locations[:,1])
-        min_y = np.min(TOSSIT_locations[:,0])
-        max_y = np.max(TOSSIT_locations[:,0])
-    else:
-        min_x = config['scaling']['min_x']
-        max_x = config['scaling']['max_x']
-        min_y = config['scaling']['min_y']
-        max_y = config['scaling']['max_y']
-    
-    # choose number of sources and generate source locations
-    source_locs = np.concatenate((rng.uniform(min_y, max_y, size=(num_sources,1)), rng.uniform(min_x, max_x, size=(num_sources,1))), axis=1)
-    
-    # generate range measurements and log associations
-    range_measurements, TOSSIT_associations, del_list, source_associations = [], [], [], []
-    for t in range(TOSSIT_locations.shape[0]):
-        
-        # calculate range measurements from all sources to TOSSIT t, adding Gaussian noise
-        r = np.abs(np.linalg.norm(source_locs - TOSSIT_locations[t,:], axis=1) + \
-            rng.normal(loc=0, scale=np.sqrt(var), size=num_sources))
-        range_measurements.append(r)
-        
-        # generate arrays for the TOSSIT associations of the measuremnts.
-        TOSSIT_associations.append(np.ones((num_sources,), dtype=int) * t)
-        
-        # generate arrays of source associations for the measurements
-        source_associations.append(np.arange(num_sources))
-    
-    # delete from each source
-    if num_delete:
-        num_delete = rng.choice(num_delete)
-        for s in range(num_sources): 
-            distances = np.sqrt(((TOSSIT_locations - source_locs[s,:]) ** 2).sum(axis=1))
-            to_delete = np.argsort(distances)[::-1][:num_delete]
-            for d in to_delete:
-                idx = np.argwhere(source_associations[d] == s)
-                range_measurements[d] = np.delete(range_measurements[d], idx)
-                source_associations[d] = np.delete(source_associations[d], idx)
-                TOSSIT_associations[d] = np.delete(TOSSIT_associations[d], idx)
-                
-    # make sure smallest association value is 0
-    bias = min([a[0] for a in source_associations if len(a)])
-    if bias > 0:
-        for i, a in enumerate(source_associations):
-            source_associations[i] = a - bias
-    
-    return range_measurements, source_associations, TOSSIT_associations, source_locs
-
-
-def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
+def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data_gen_params):
 
     # initialize results dict
     results = {
@@ -233,12 +50,8 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
         "percent_possible_detections": float('nan'),
         "localization_error": float('nan'),
         "best_localization_error": float('nan'),
+        "num_OOB": float('nan'),
     }
-
-    # boolean results
-    over_predict_sources = False
-    FN = False
-    FP = False
 
     # get number of possible associations
     assoc_flat = np.concatenate(s_assocs)
@@ -257,27 +70,25 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
     if not successful:
         # check for FN
         if possible:
-            #FN = True
             results["FN"] = True
-        #return float('nan'), FN, FP, float('nan'), float('nan'), float('nan')
         return results
     else:
         # check for FP
         if not possible:
-            #FP = True
             results["FP"] = True
-            #return float('nan'), FN, FP, float('nan'), float('nan'), float('nan')
             return results
         assocs_est, locs_est = L.associate_and_localize(method='partition', reduce_dups=True, last_step=True)
 
     # if no FP or FN, set over_predict_sources to False
     results["over_predict_sources"] = False
 
+    # calculate number OOB
+    locs_est, n = filter_oob_locs(locs_est)
+    results["num_OOB"] = n
+
     # if we predict too many sources return
     if locs_est.shape[0] > s_locs.shape[0]:
-        # over_predict_sources = True
         results["over_predict_sources"] = True
-        #return over_predict_sources, FN, FP, float('nan'), float('nan'), float('nan')
         return results
 
     # calculate location errors
@@ -315,12 +126,11 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params):
     percent_possible_detections = len(assocs_est) / len(possible_associations)
     results['percent_possible_detections'] = percent_possible_detections
     
-    #return over_predict_sources, FN, FP, percent_possible_detections, res, best_res
     return results
 
 def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_params, set_measurement_params, data_gen_params):
 
-    columns = ["num_sources", "std", "over_predict_sources", "FN", "FP", "percent_possible_detections", "localization_error", "best_localization_error"]
+    columns = ["in_sensors", "method_thresh", "num_delete", "num_sources", "std", "over_predict_sources", "FN", "FP", "percent_possible_detections", "localization_error", "best_localization_error", "num_OOB"]
     df = pd.DataFrame(columns=columns)
 
     # load map
@@ -352,20 +162,15 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
             source_locs_list = []
             for i in range(n):
                 while True:
-                    measurements, source_associations, TOSSIT_associations, source_locs = generate_measurements(num_sources=num_sources, var=std ** 2, **data_gen_params)
+                    measurements, source_associations, TOSSIT_associations, source_locs = sim_datagen.generate_measurements(num_sources=num_sources, var=std ** 2, **data_gen_params)
                     if np.concatenate(measurements).max() <= config['scaling']['max_r'] \
                        and math_tools.is_sparse_locs(source_locs, thresh=sparse_distance) \
-                       and is_in_bay(source_locs, bathym, map_origin, dx, dy):
+                       and sim_data_checks.is_in_bay(source_locs, bathym, map_origin, dx, dy):
                         break
                 measurements_list.append(measurements)
                 source_associations_list.append(source_associations)
                 TOSSIT_associations_list.append(TOSSIT_associations)
                 source_locs_list.append(source_locs)
-
-            # Image.MAX_IMAGE_PIXELS = 729744000
-            # bathym = Image.open(os.path.join(config['dataset']['data_directory'], "mikesbathym.tif"))
-            # plot_localization(source_locs_list, buffer=0, title=None, bathym=bathym, dates=None, save='image.png') 
-            # return
 
             # delayed for loop using dask
             results = []
@@ -374,7 +179,8 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
                                                 source_associations_list[i],
                                                 TOSSIT_associations_list[i],
                                                 source_locs_list[i],
-                                                localizer_params_final)
+                                                localizer_params_final,
+                                                data_gen_params)
                 results.append(res)
 
             # parallelize MC
@@ -389,20 +195,17 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
             FP_list = []
             best_localization_error_list = []
             percent_possible_detections_list = []
+            num_OOB_list = []
             for result in results:
                 
                 # save results
-                # source_over_predict_list.append(result[0]),
-                # FN_list.append(result[1])
-                # FP_list.append(result[2])
-                # percent_possible_detections_list.append(result[3])
                 source_over_predict_list.append(result['over_predict_sources']),
                 FN_list.append(result["FN"])
                 FP_list.append(result["FP"])
                 percent_possible_detections_list.append(result["percent_possible_detections"])
+                num_OOB_list.append(result["num_OOB"])
                 
                 # save localization errors in a string format
-                # if isinstance(result[4], np.ndarray):
                 if isinstance(result["localization_error"], np.ndarray):
                     loc_err_str = ""
                     best_loc_err_str = ""
@@ -413,20 +216,22 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
                     localization_error_list.append(loc_err_str)
                     best_localization_error_list.append(best_loc_err_str)
                 else:
-                    # localization_error_list.append(result[4])
-                    # best_localization_error_list.append(result[5])
                     localization_error_list.append(result["localization_error"])
                     best_localization_error_list.append(result["best_localization_error"])
 
             # append results to dataframe
-            df = pd.concat([df, pd.DataFrame({"num_sources": [num_sources for _ in range(n)],
+            df = pd.concat([df, pd.DataFrame({"in_sensors": [data_gen_params["in_sensors"] for _ in range(n)],
+                                              "method_thresh": [localizer_params_final['multilat'].method_thresh for _ in range(n)],
+                                              "num_delete": [data_gen_params["num_delete"] for _ in range(n)],
+                                              "num_sources": [num_sources for _ in range(n)],
                                               "std": [std for _ in range(n)],
                                               "over_predict_sources": source_over_predict_list,
                                               "FN": FN_list,
                                               "FP": FP_list,
                                               "percent_possible_detections": percent_possible_detections_list,
                                               "localization_error": localization_error_list,
-                                              "best_localization_error":best_localization_error_list,})], ignore_index=True)
+                                              "best_localization_error": best_localization_error_list,
+                                              "num_OOB": num_OOB_list})], ignore_index=True)
     
     return df
 
@@ -452,14 +257,14 @@ if __name__ == "__main__":
         rng2 = np.random.default_rng(1524)
 
         # parameters for localizer and data_generator
-        localizer_params = dict(k=4, multilat={i : MultilaterationOpt(method_thresh=0.90 if i == 0 else float('inf'), rng=rng1) for i in [1000]}, consistency_thresh={0: 2, 250: 500, 500: 1500, 750: 2000, 1000: 2500}, dup_thresh=3000, prune=False)
+        localizer_params = dict(k=4, multilat={i : MultilaterationOpt(method_thresh=0.5, rng=rng1) for i in [0, 250, 500, 750, 1000]}, consistency_thresh={0: 2, 250: 500, 500: 1500, 750: 2000, 1000: 2500}, dup_thresh=3000, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
-        data_gen_params = dict(num_delete=0, rng=rng2, in_sensors=False)
+        data_gen_params = dict(num_delete=0, rng=rng2, in_sensors=True)
 
         # run MC
         df = run_monte_carlo(n=300,
                              std_list=[1000],
-                             num_sources_list=range(1,6),
+                             num_sources_list=range(1,2),
                              sparse_distance=10,
                              localizer_params=localizer_params,
                              set_measurement_params=set_measurement_params,
@@ -572,8 +377,8 @@ if __name__ == "__main__":
             unsupervised_per[i,j] = np.percentile(location_error_dict[(std,n)][~np.isnan(location_error_dict[(std,n)])], 95)
             best_per[i,j] = np.percentile(best_location_error_dict[(std,n)], 95)
 
-            print(f"n = {n}, std = {std}: {np.percentile(location_error_dict[(std,n)][~np.isnan(location_error_dict[(std,n)])], 95)}")
-            print(f"BEST -- n = {n}, std = {std}: {np.percentile(best_location_error_dict[(std,n)], 95)}")
+            #print(f"n = {n}, std = {std}: {np.percentile(location_error_dict[(std,n)][~np.isnan(location_error_dict[(std,n)])], 95)}")
+            #print(f"BEST -- n = {n}, std = {std}: {np.percentile(best_location_error_dict[(std,n)], 95)}")
             
             _,bins,_ = axx[i,j].hist(location_error_dict[(std,n)] / 1000, alpha=0.5, bins=300, label='unsupervised')
             axx[i,j].hist(best_location_error_dict[(std,n)] / 1000, alpha=0.5, bins=bins, label='ideal')
@@ -616,7 +421,8 @@ if __name__ == "__main__":
     dff = df.groupby(by=['std', 'num_sources']).agg({'over_predict_sources': ['mean'],
                                                      'FN': ['mean'],
                                                      'FP': ['mean'],
-                                                     'percent_possible_detections': ['mean','std']})
+                                                     'percent_possible_detections': ['mean','std'],
+                                                     'num_OOB': ['mean', 'std']})
 
     if args.save_figs:
         fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments","results", "data_assoc_and_loc")
