@@ -413,6 +413,10 @@ if __name__ == "__main__":
     axs[3].set_title("Ideal")
     axs[3].invert_yaxis()
 
+    #---------------------------------------------------#
+    #------------ finalize plot/data and save ----------#
+    #---------------------------------------------------#
+
     for i, ax in enumerate(axs):
         if i in [2, 3]:
             continue

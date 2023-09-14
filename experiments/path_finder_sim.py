@@ -294,6 +294,10 @@ if __name__ == "__main__":
     figs = [plt.figure() for _ in range(2)]
     axs = [fig.gca() for fig in figs]
 
+    #---------------------------------------------------#
+    #-------- error distributions and percentiles ------#
+    #---------------------------------------------------#
+
     df["theta_error"] = bearing_error(df["theta"], df["theta_hat"]).squeeze().tolist()
     sns.boxplot(x=df['std'], 
                 y=df['theta_error'], 
@@ -339,6 +343,10 @@ if __name__ == "__main__":
     axs[1].set_xlabel("Max Time Offset [s]")
     axs[1].set_ylabel("Measurement Standard Deviation [m]")
     axs[1].invert_yaxis()
+
+    #---------------------------------------------------#
+    #------------ finalize plot/data and save ----------#
+    #---------------------------------------------------#
 
     for i, ax in enumerate(axs):
         if i == 1:
