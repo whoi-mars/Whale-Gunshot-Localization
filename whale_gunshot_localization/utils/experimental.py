@@ -167,7 +167,12 @@ class MultilaterationOpt(MultilaterationBase):
         array-like
             optimized location
         """
-                
+        
+        # shortcut to NLS solution
+        if self.method_thresh == float('inf'):
+            cost, loc = self._opt(ranges, sensors_idx)
+            return cost, loc
+
         # get sensors and save how many
         p_i = self.TOSSIT_locations.T[:,sensors_idx]
         N = p_i.shape[1]
@@ -720,10 +725,10 @@ class Localizer:
             locs.append(loc)
         locs = np.asarray(locs)
         
-        if reduce_dups:
-            associations, locs = self._eliminate_dups(locs, associations, thresh=self.dup_thresh)
         if last_step:
             associations, locs = self._last_step(locs, associations)
+        if reduce_dups:
+            associations, locs = self._eliminate_dups(locs, associations, thresh=self.dup_thresh)
         return associations, locs
 
 #######################################################################################################################
