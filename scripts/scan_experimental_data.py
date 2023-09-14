@@ -86,24 +86,26 @@ def plot_localization(locs_est, buffer=6000, title=None, dates=None, save=None, 
     colors = [rng.uniform(0, 255, size=3) for _ in range(len(locs_est))]
 
     # load constants
-    # TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-    TOSSIT_latlons = np.asarray([config['TOSSIT']['TOSSIT_lat'], config['TOSSIT']['TOSSIT_lon']]).T
+    TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
     min_x = config['scaling']['min_x']
     max_x = config['scaling']['max_x']
     min_y = config['scaling']['min_y']
     max_y = config['scaling']['max_y']
 
     # define projection object
-    pargs = proj.Proj(proj="aeqd", lat_0=TOSSIT_latlons[0,0], lon_0=TOSSIT_latlons[0,1], datum="WGS84", units="m")
+    pargs = proj.Proj(proj="aeqd", lat_0=41.9108, lon_0=-70.4292, datum="WGS84", units="m")
     
     # get lon/lat bounds for the map
     lon, lat = pargs([min_x-buffer, max_x+buffer], [min_y-buffer, max_y+buffer], inverse=True)
     region = [*lon, *lat]
 
+    # convert sensor locs to lat/lon
+    lon_TOSSIT, lat_TOSSIT = pargs(TOSSIT_locations[:,1], -TOSSIT_locations[:,0], inverse=True)
+
     fig = pygmt.Figure()
     fig.basemap(region=region, projection="M15c", frame=True)
     fig.coast(land="black", water="skyblue4")
-    fig.plot(x=TOSSIT_latlons[:,1], y=TOSSIT_latlons[:,0], style="t0.3c", fill="grey", pen="black", label="sensors")
+    fig.plot(x=lon_TOSSIT, y=lat_TOSSIT, style="t0.3c", fill="green", pen="black", label="sensors")
     for i, l in enumerate(locs_est):
         lon_est, lat_est = pargs(l[:,1], -l[:,0], inverse=True)
         fig.plot(x=lon_est, y=lat_est, style="x0.3c", pen=f"1p,{colors[i][0]}/{colors[i][1]}/{colors[i][2]}", label=f'estimate ({dates[i]})' if dates[0] else 'estimate')
@@ -150,7 +152,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
     wav_files = []
     for s in ordered_sensors:
         wav_files.extend(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], s, "*.wav")))
-    # wav_files = np.asarray(wav_files)
+    wav_files = np.asarray(wav_files)
     
     # sort wav files in chonological order by start time
     wav_files, start_times, end_times = experimental.sort_wav_chronological(wav_files)
@@ -182,7 +184,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
     CA = experimental.ClipAnalyzer(model, data_params, preprocessor=experimental.l2_standardize, device=device)
 
     # prepare localizer object
-    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=float('inf')), consistency_thresh=2000, prune=False)
+    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=0.5), consistency_thresh=2000, prune=False)
 
     # get starts of chunks to read and total days
     chunk_starts = pd.date_range(start=start, end=end, freq=f"{chunk_size}s")
@@ -339,9 +341,9 @@ if __name__ == '__main__':
 
         # plot locations by day
         locs_est = np.stack([y, x], axis=1)
-        plot_localization(locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_{date.date()}.png"), bathym=bathym, dates=date.date())
+        plot_localization(locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_{date.date()}.png"), dates=date.date())
         all_dates.append(date.date())
         all_locs_est.append(locs_est)
         
     # plot all days
-    plot_localization(all_locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_all_dates.png"), bathym=bathym, dates=all_dates, legend_transparency=70)
+    plot_localization(all_locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_all_dates.png"), dates=all_dates, legend_transparency=70)
