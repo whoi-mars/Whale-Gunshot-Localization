@@ -575,13 +575,11 @@ class Localizer:
             idx = np.arange(len(locs))
                         
             if len(locs) == 1:
-                #print("last")
                 locs_no_dups.append(locs[0])
                 assocs_no_dups.append(assocs[0])
                 break
             
             if len(locs) == 0:
-                #print("zero")
                 break
 
             # remove the ith location estimate
@@ -591,7 +589,6 @@ class Localizer:
             dists = np.sqrt(((locs[sub_idx] - locs[0]) ** 2).sum(axis=1))
 
             if (dists <= thresh).sum():
-                #print("yep")
                 to_del = [0] + list(sub_idx[dists <= thresh])
                 
                 new_association = set.union(*assocs[to_del])
@@ -604,11 +601,9 @@ class Localizer:
                 locs_no_dups.append(loc)
                 assocs_no_dups.append(new_association)
 
-                #print(locs.shape)
                 locs = np.delete(locs, to_del, axis=0)
                 assocs = np.delete(assocs, to_del, axis=0)
             else:
-                #print("nope")
                 locs_no_dups.append(locs[0])
                 assocs_no_dups.append(assocs[0])
                 locs = np.delete(locs, 0, axis=0)
