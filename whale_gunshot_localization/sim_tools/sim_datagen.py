@@ -10,6 +10,8 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
     ----------
     num_sources : int
         maximum number of sources
+    rng : numpy.random._generator.Generator
+        RNG object
     var : float
         variance of Gaussian noise added to range measurements
     num_delete : int
@@ -85,6 +87,38 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
     return range_measurements, source_associations, TOSSIT_associations, source_locs
 
 def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000), timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, max_channel_offset=40, rng=None, in_sensors=False):
+    """
+    Generate a simulated trajectory/path of source locations along with time-stamped measurements
+    
+    Paramters
+    ---------
+    rng : numpy.random._generator.Generator
+        RNG object
+    num_points : int
+        number of points in the path
+    beam_width : float
+        arc within which we generate the next source point
+    timeing_stats : Tuple[float, float]
+        mean/std of call generation (in minutes)
+    repetition_time : float
+        time between repetitions when > 1
+    repetitions : int
+        number of repetitions
+    whale_speed : float
+        speed of simulated whale in km/hr
+    chunk_size : float
+        chunk of data to analyze at once (in minutes)
+    in_sensors : bool
+        whether or not to generate soure locations only in the sensor network
+
+    Returns
+    -------
+    source_locs : array-like, of shape N X 2
+        locations of sources in trajectory/path
+    measurements_list : List[List[array-like]]
+        list of measurements collected at each source location in the path
+        on all sensors
+    """
     
     # check inputs
     assert num_points > 0, "number of sources must be non-negative"
@@ -92,7 +126,7 @@ def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000)
     if rng is None:
         rng = np.random
     
-    # convert whale speed to m / second
+    # convert whale speed to m / minute
     whale_speed *= (1000 / 60)
     # convert timing_stats to seconds
     timing_stats = tuple([i*60 for i in timing_stats])
