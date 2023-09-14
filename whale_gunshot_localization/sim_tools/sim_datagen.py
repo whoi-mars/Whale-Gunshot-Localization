@@ -83,3 +83,98 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
             source_associations[i] = a - bias
     
     return range_measurements, source_associations, TOSSIT_associations, source_locs
+
+def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000), timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, max_channel_offset=40, rng=None, in_sensors=False):
+    
+    # check inputs
+    assert num_points > 0, "number of sources must be non-negative"
+
+    if rng is None:
+        rng = np.random
+    
+    # convert whale speed to m / second
+    whale_speed *= (1000 / 60)
+    # convert timing_stats to seconds
+    timing_stats = tuple([i*60 for i in timing_stats])
+    # convert chunk size to seconds
+    chunk_size *= 60
+    
+    # get TOSSIT locations and extreme coordinate values
+    TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
+
+    if in_sensors:
+        min_x = np.min(TOSSIT_locations[:,1])
+        max_x = np.max(TOSSIT_locations[:,1])
+        min_y = np.min(TOSSIT_locations[:,0])
+        max_y = np.max(TOSSIT_locations[:,0])
+    else:
+        min_x = config['scaling']['min_x']
+        max_x = config['scaling']['max_x']
+        min_y = config['scaling']['min_y']
+        max_y = config['scaling']['max_y']
+    
+    # choose number of sources and generate source locations
+    source_locs = np.concatenate((rng.uniform(min_y, max_y, size=(1,1)), rng.uniform(min_x, max_x, size=(1,1))), axis=1)
+    time_stamps = np.arange(0, num_repetitions * repetition_time, repetition_time)
+    heading = rng.uniform(0, 359, size=1)
+    
+    curr_loc = source_locs[[0]]
+    measurements = [np.asarray([]) for _ in range(TOSSIT_locations.shape[0])]
+    while True:
+        
+        # get measurements
+        for t in range(TOSSIT_locations.shape[0]):
+            # calculate range measurements from all sources to TOSSIT t, adding Gaussian noise
+            r = np.linalg.norm(curr_loc - TOSSIT_locations[t,:], axis=1) + \
+                rng.normal(loc=measurement_stats[0], scale=np.sqrt(measurement_stats[1]), size=num_repetitions)
+            measurements[t] = np.append(measurements[t], r)
+
+        if source_locs.shape[0] == num_points:
+            break
+        
+        # time delta to next source
+        new_time_delta = rng.normal(loc=timing_stats[0], scale=np.sqrt(timing_stats[1]))
+        
+        # timestamp(s) for current source location
+        time_stamps = np.append(time_stamps, [time_stamps[-1] + new_time_delta + repetition_time*i for i in range(num_repetitions)])
+
+        # calculate magnitude of transition vector
+        vec_mag = whale_speed * new_time_delta
+    
+        # transition vector to get from current location to the next one
+        transition_vector = (vec_mag * np.asarray([-np.sin(np.radians(heading)), np.cos(np.radians(heading))])).T
+        
+        # get new location and save
+        curr_loc += transition_vector
+        source_locs = np.concatenate((source_locs, curr_loc), axis=0)
+        
+        # get new heading
+        heading += rng.uniform(-beam_width / 2, beam_width / 2)
+    
+    # create offset timestamps for each sensor
+    time_stamps = time_stamps[np.newaxis,:]
+    for t in range(TOSSIT_locations.shape[0]):
+        offset = rng.uniform(low=0, high=max_channel_offset)
+        time_stamps = np.concatenate((time_stamps, time_stamps[[0],:] + offset), axis=0)    
+    
+    # split measurements
+    measurements_list = []
+    pointer = 0
+    while pointer <= time_stamps[:,-1].max():
+        
+        new_measurements = []
+        for t in range(TOSSIT_locations.shape[0]):
+        
+            # get measurements indices of time chunk
+            idx = np.where((time_stamps[t] >= pointer) & (time_stamps[t] < pointer + chunk_size))[0]
+
+            # save in list
+            new_measurements.append(measurements[t][idx])
+
+        # append location measurements to overall list        
+        measurements_list.append(new_measurements)
+        
+        # iterate pointer
+        pointer += chunk_size
+                        
+    return source_locs, measurements_list
