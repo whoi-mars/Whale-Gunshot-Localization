@@ -19,7 +19,6 @@ import dask
 from dask.distributed import Client, LocalCluster, progress
 from PIL import Image
 
-
 import whale_gunshot_localization.utils.math_tools as math_tools
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 from whale_gunshot_localization.utils.experimental import Localizer, MultilaterationOpt, MultilaterationGrid
@@ -36,7 +35,26 @@ parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
 args = parser.parse_args()
 
+##################################################
+#               helper functions                 #
+##################################################
+
 def nested_list_max(l):
+    """
+    Get the max value from a list of lists where the sublists
+    may be of different sizes.
+
+    Parameters
+    ----------
+    l : List[array-like]
+        list of ragged lists
+    
+    Returns
+    -------
+    : float
+        maximum values
+    """
+
     maxx = -float('inf')
     for ll in l:
         if len(ll):
@@ -46,7 +64,29 @@ def nested_list_max(l):
     return maxx
 
 def filter_oob_locs(locs, buffer=15000):
-    idx = np.where((config['scaling']['min_y'] - buffer <= locs[:,0]) & (locs[:,0] <= (config['scaling']['max_y'] + buffer)) & (config['scaling']['min_x'] - buffer <= locs[:,1]) & (locs[:,1] <= (config['scaling']['max_x'] + buffer)))[0]
+    """
+    Filter out locations that are outside of the specified training region
+    with a specified buffer.
+
+    Parameters
+    ----------
+    locs : array-like, of shape N X 2
+        locations to filter
+    buffer : float
+        how much to buffer out the sides of the training region
+
+    Return
+    ------
+    locs : array-like, of shape M X 2
+        filter locations
+    : int
+        how many locations were filtered out
+    """
+    
+    idx = np.where((config['scaling']['min_y'] - buffer <= locs[:,0]) & \
+                   (locs[:,0] <= (config['scaling']['max_y'] + buffer)) & \
+                   (config['scaling']['min_x'] - buffer <= locs[:,1]) & \
+                   (locs[:,1] <= (config['scaling']['max_x'] + buffer)))[0]
     return locs[idx,:], len(locs) - len(idx)
 
 def get_bearing(x_ends, y_ends):
@@ -96,8 +136,34 @@ def bearing_error(bearing1, bearing2):
     theta[theta > 180] = 360 - theta[theta > 180]
     return theta
 
+##################################################
+#                  monte carlo                   #
+##################################################
+
 def monte_carlo(source_locs, measurements_list, localizer_params):
-    
+    """
+    Run an instance of the monte carlo simulation.
+
+    Parameters
+    ----------
+    source_locs : array-like, of shape N X 2
+        source locations in the path
+    measurements_list : List[List[array-like]]
+        list of measurements collected at each source location in the path
+        on all sensors
+    localizer_params : dict
+        dictionary of loclizer object parameters
+
+    Returns
+    -------
+    results : dict
+        dictionary with the following entries
+        - path_detected --> whether or not a path was detected
+        - theta --> true source bearing
+        - theta_hat --> estimated source bearing
+        - num_OOB --> number of source location estimates out of bounds of the region 
+    """
+
     # results dict
     results = {"path_detected": False,
                "theta": float('nan'),
@@ -152,7 +218,46 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
     return results
 
 def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_measurement_params, data_gen_params):
-    
+    """
+    Function to run the monte carlo simulations
+
+    Parameters
+    ----------
+    n : int
+        number of monte carlo runs to do per std/time offsset combo
+    max_time_offset_list : List[float]
+        list of maximum time offsets to randomly shift each channel by (relative to the first)
+    std_list : List[float]
+        list of range measurement noise stds
+    localizer_params : dict
+        dictionary of parameters for localizer object
+        - k : int --> k value for group-k consistency check
+        - multilat : MultilaterationBase --> instantiated multilateration object to use
+        - consistency_thresh : float --> dict which maps std --> group-k threshhold
+        - prune : bool --> ensure that all measurements in k-1 subgroups intersect to count as a consistent set
+    set_measurement_params : dict
+        dictionary of parameters for the set_measurement method of the localizer object
+        - adaptive : bool --> whether or not we want to increase the consistency threshold if nothing was deemed group-k consistent
+        - adaptive_delta : float --> how much to adaptively increase consistency threshold by
+        - adaptive_max : float --> maximum consistency threshold before giving up in adaptive mode
+    data_gen_parames : dict
+        dictionary of parameters for simulated data generation
+        - rng : numpy.random._generator.Generator --> RNG object
+        - num_points : int --> number of points in the path
+        - beam_width : float --> arc within which we generate the next source point
+        - timeing_stats : Tuple[float, float] --> mean/std of call generation (in minutes)
+        - repetition_time : float --> time between repetitions when > 1
+        - repetitions : int --> number of repetitions
+        - whale_speed : float --> speed of simulated whale in km/hr
+        - chunk_size : float --> chunk of data to analyze at once (in minutes)
+        - in_sensors : bool --> whether or not to generate soure locations only in the sensor network
+
+    Returns
+    -------
+    df : pandas.DataFrame
+        dataframe of results
+    """
+
     assert data_gen_params['beam_width'] == 0, "beam width must be 0 for monte carlo simulations"
 
     columns = ["k", "consistency_thresh", "method_thresh", "prune", "max_time_offset", "std", "success_rate", "theta", "theta_hat", "num_OOB"]
@@ -234,7 +339,7 @@ def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_mea
 if __name__ == "__main__":
 
     # path for results CSV
-    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder", "path_finder_sim_results.csv")
+    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder", "path_finder_sim_results_in_sensors.csv")
     fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder")
 
     # set up results directory
@@ -314,6 +419,12 @@ if __name__ == "__main__":
     axs[0].legend(title='max channel offset [s]')
     axs[0].set_axisbelow(True)
 
+    figg, axx = plt.subplots(len(std_list), len(max_time_offset_list), figsize=(26,26))
+    if not isinstance(axx, np.ndarray):
+        axx = np.asarray([[axx]])
+    elif len(axx.shape) < 2:
+        axx = np.asarray([axx])
+
     unsupervised_per = np.zeros((len(std_list), len(max_time_offset_list)))
     # annot = np.zeros((len(std_list), len(max_time_offset_list)))
     for i, std in enumerate(std_list):
@@ -324,21 +435,28 @@ if __name__ == "__main__":
             # get error for category
             err = d["theta_error"]
             
-            # calculate IQR
-            # q1 = np.percentile(err, 25)
-            # q3 = np.percentile(err, 75)
-            # IQR = q3 - q1
+            # store 95th percentile error
+            unsupervised_per[i,j] = np.percentile(err, 90)
 
-            # get
-            # vals[i, j] = np.percentile(err[err > 1.5*IQR], 90)
-            # annot[i, j] = len(err[err > 1.5*IQR]) / len(err) 
-            unsupervised_per[i,j] = np.percentile(err, 95)
+            _,bins,_ = axx[i,j].hist(err, alpha=0.5, bins=300, label='unsupervised')
+            # axx[i,j].hist(best_location_error_dict[(std,n)] / 1000, alpha=0.5, bins=bins, label='ideal')
+            axx[i,j].set_title(f"$\sigma$={std} m, " + "$t_{offset}$=" + f"{toff} s", fontsize=22)
+            axx[i,j].tick_params(axis='x', labelsize=16)
+            axx[i,j].tick_params(axis='y', labelsize=16)
+            axx[i,j].yaxis.get_offset_text().set_fontsize(14)
+            axx[i,j].xaxis.get_offset_text().set_fontsize(14)
+
+    handles, labels = axx[0,0].get_legend_handles_labels()
+    figg.legend(handles, labels, loc='upper center', prop={'size': 28})
+    figg.subplots_adjust(wspace=0.35, hspace=0.35)
+    figg.text(0.5, 0.04, "Bearing Error [degrees]", ha='center', va='center', fontsize=28)
+    figg.text(0.05, 0.5, "Example Count", ha='center', va='center', rotation=90, fontsize=28)
 
     sns.heatmap(unsupervised_per,
                 # annot=annot,
                 xticklabels=max_time_offset_list,
                 yticklabels=std_list,
-                cbar_kws={'label': '90th Percentile Outliers'},
+                cbar_kws={'label': '95th Percentile Outliers'},
                 ax=axs[1])
     axs[1].set_xlabel("Max Time Offset [s]")
     axs[1].set_ylabel("Measurement Standard Deviation [m]")
@@ -356,6 +474,7 @@ if __name__ == "__main__":
     if args.save_figs:
         figs[0].savefig(os.path.join(fig_path, "theta_error.png"))
         figs[1].savefig(os.path.join(fig_path, "unsupervised_percentile.png"))
+        figg.savefig(os.path.join(fig_path, "hists.png"))
 
     # make table of means and stds
     dff = df.groupby(by=['std', 'max_time_offset']).agg({'theta_error' : ['mean', 'std'],
