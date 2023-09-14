@@ -23,6 +23,8 @@ from PIL import Image
 import whale_gunshot_localization.utils.math_tools as math_tools
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 from whale_gunshot_localization.utils.experimental import Localizer, MultilaterationOpt, MultilaterationGrid
+import whale_gunshot_localization.sim_tools.sim_datagen as sim_datagen
+import whale_gunshot_localization.sim_tools.sim_data_checks as sim_data_checks
 
 # parse input arguments
 parser = argparse.ArgumentParser(description="Run Monte Carlo simulations for data association/localization for a train of calls")
@@ -43,38 +45,9 @@ def nested_list_max(l):
                 maxx = ll[-1]
     return maxx
 
-def is_in_bay(source_locs, bathym, map_origin, dx, dy):
-    """
-    Check if source locations are in CCB.
-    
-    Parameters
-    ----------
-    source_locs : array-like[array-like]
-        matrix of generated source locations'
-    bathym : PIL.Image
-        geotiff of the bathymetry
-    map_origin : array-like of shape 1 X 2
-        pixels coordinates of the origin of the bathymetry map
-    dx : float
-        approximate change in meters when going in the X direction
-    dy : float
-        approximate change in meters when going in the Y direction
-    
-    Returns
-    -------
-    : bool
-        whether all source_locs are in water (True) or not (False)
-    """
-
-    for loc in source_locs:
-        # line cutting off locations on the open-ocean side of Provincetown
-        line1 = loc[0] - 0.88434446716*loc[1] < -38672.47
-        # line cutting off locations on the west side of the Cape Cod Canal
-        line2 = loc[0] - 0.84448322668*loc[1] > 19385.3 
-        pixel = bathym.getpixel((round(map_origin[1] + loc[1]/dx), round(map_origin[0] + loc[0]/dy)))
-        if pixel == 147 or line1 or line2:
-            return False
-    return True
+def filter_oob_locs(locs, buffer=15000):
+    idx = np.where((config['scaling']['min_y'] - buffer <= locs[:,0]) & (locs[:,0] <= (config['scaling']['max_y'] + buffer)) & (config['scaling']['min_x'] - buffer <= locs[:,1]) & (locs[:,1] <= (config['scaling']['max_x'] + buffer)))[0]
+    return locs[idx,:], len(locs) - len(idx)
 
 def get_bearing(x_ends, y_ends):
     """
@@ -123,131 +96,13 @@ def bearing_error(bearing1, bearing2):
     theta[theta > 180] = 360 - theta[theta > 180]
     return theta
 
-# def plot_localization(source_locs, locs_est=None, title='', buffer=6000): 
-    
-#     # load constants
-#     TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-#     min_x = config['scaling']['min_x']
-#     max_x = config['scaling']['max_x']
-#     min_y = config['scaling']['min_y']
-#     max_y = config['scaling']['max_y']
-    
-#     fig, ax = plt.subplots(1, 1)
-#     ax.plot(TOSSIT_locations[:,1], TOSSIT_locations[:,0], '^', markersize=12, label='sensor', markeredgewidth=2)
-#     ax.plot(source_locs[:,1], source_locs[:,0], 'o', label='ground truth')
-#     if locs_est is not None:
-#         ax.plot(locs_est[:,1], locs_est[:,0], 'x', label='estimate', markeredgewidth=2)
-#     ax.set_xlabel("X [m]")
-#     ax.set_ylabel("Y [m]")
-#     ax.set_xlim([min_x-buffer, max_x+buffer])
-#     ax.set_ylim([min_y-buffer, max_y+buffer])
-#     ax.invert_yaxis()
-#     ax.legend()
-#     if len(title):
-#         ax.set_title(title)
-#     fig.savefig('test.png')
-
-def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000), timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, max_channel_offset=40, rng=None, in_sensors=False):
-    
-    # check inputs
-    assert num_points > 0, "number of sources must be non-negative"
-
-    if rng is None:
-        rng = np.random
-    
-    # convert whale speed to m / second
-    whale_speed *= (1000 / 60)
-    # convert timing_stats to seconds
-    timing_stats = tuple([i*60 for i in timing_stats])
-    # convert chunk size to seconds
-    chunk_size *= 60
-    
-    # get TOSSIT locations and extreme coordinate values
-    TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-
-    if in_sensors:
-        min_x = np.min(TOSSIT_locations[:,1])
-        max_x = np.max(TOSSIT_locations[:,1])
-        min_y = np.min(TOSSIT_locations[:,0])
-        max_y = np.max(TOSSIT_locations[:,0])
-    else:
-        min_x = config['scaling']['min_x']
-        max_x = config['scaling']['max_x']
-        min_y = config['scaling']['min_y']
-        max_y = config['scaling']['max_y']
-    
-    # choose number of sources and generate source locations
-    source_locs = np.concatenate((rng.uniform(min_y, max_y, size=(1,1)), rng.uniform(min_x, max_x, size=(1,1))), axis=1)
-    time_stamps = np.arange(0, num_repetitions * repetition_time, repetition_time)
-    heading = rng.uniform(0, 359, size=1)
-    
-    curr_loc = source_locs[[0]]
-    measurements = [np.asarray([]) for _ in range(TOSSIT_locations.shape[0])]
-    while True:
-        
-        # get measurements
-        for t in range(TOSSIT_locations.shape[0]):
-            # calculate range measurements from all sources to TOSSIT t, adding Gaussian noise
-            r = np.linalg.norm(curr_loc - TOSSIT_locations[t,:], axis=1) + \
-                rng.normal(loc=measurement_stats[0], scale=np.sqrt(measurement_stats[1]), size=num_repetitions)
-            measurements[t] = np.append(measurements[t], r)
-
-        if source_locs.shape[0] == num_points:
-            break
-        
-        # time delta to next source
-        new_time_delta = rng.normal(loc=timing_stats[0], scale=np.sqrt(timing_stats[1]))
-        
-        # timestamp(s) for current source location
-        time_stamps = np.append(time_stamps, [time_stamps[-1] + new_time_delta + repetition_time*i for i in range(num_repetitions)])
-
-        # calculate magnitude of transition vector
-        vec_mag = whale_speed * new_time_delta
-    
-        # transition vector to get from current location to the next one
-        transition_vector = (vec_mag * np.asarray([-np.sin(np.radians(heading)), np.cos(np.radians(heading))])).T
-        
-        # get new location and save
-        curr_loc += transition_vector
-        source_locs = np.concatenate((source_locs, curr_loc), axis=0)
-        
-        # get new heading
-        heading += rng.uniform(-beam_width / 2, beam_width / 2)
-    
-    # create offset timestamps for each sensor
-    time_stamps = time_stamps[np.newaxis,:]
-    for t in range(TOSSIT_locations.shape[0]):
-        offset = rng.uniform(low=0, high=max_channel_offset)
-        time_stamps = np.concatenate((time_stamps, time_stamps[[0],:] + offset), axis=0)    
-    
-    # split measurements
-    measurements_list = []
-    pointer = 0
-    while pointer <= time_stamps[:,-1].max():
-        
-        new_measurements = []
-        for t in range(TOSSIT_locations.shape[0]):
-        
-            # get measurements indices of time chunk
-            idx = np.where((time_stamps[t] >= pointer) & (time_stamps[t] < pointer + chunk_size))[0]
-
-            # save in list
-            new_measurements.append(measurements[t][idx])
-
-        # append location measurements to overall list        
-        measurements_list.append(new_measurements)
-        
-        # iterate pointer
-        pointer += chunk_size
-                        
-    return source_locs, measurements_list
-
 def monte_carlo(source_locs, measurements_list, localizer_params):
     
     # results dict
     results = {"path_detected": False,
                "theta": float('nan'),
-               "theta_hat": float('nan'),}
+               "theta_hat": float('nan'),
+               "num_OOB": float('nan'),}
     
     # instantiate localizer
     l = Localizer(**localizer_params)
@@ -268,11 +123,12 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
             continue
         else:
             # we've detected some portion of the path
-            #path_detected = True
             results["path_detected"] = True
 
             # associate/localize
             assoc, locs_est = l.associate_and_localize(method='partition', reduce_dups=False, last_step=False)
+            locs_est, n = filter_oob_locs(locs_est)
+            results["num_OOB"] = n
 
             if i == 0:
                 locs_ests = locs_est
@@ -299,7 +155,7 @@ def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_mea
     
     assert data_gen_params['beam_width'] == 0, "beam width must be 0 for monte carlo simulations"
 
-    columns = ["k", "consistency_thresh", "method_thresh", "prune", "max_time_offset", "std", "success_rate", "theta", "theta_hat"]
+    columns = ["k", "consistency_thresh", "method_thresh", "prune", "max_time_offset", "std", "success_rate", "theta", "theta_hat", "num_OOB"]
     df = pd.DataFrame(columns=columns)
 
     # load map
@@ -328,9 +184,9 @@ def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_mea
             measurements_set_list = []
             for _ in range(n):
                 while True:
-                    source_locs, measurements_list = generate_trajectory(measurement_stats=(0, std ** 2), max_channel_offset=max_time_offset, **data_gen_params)
+                    source_locs, measurements_list = sim_datagen.generate_trajectory(measurement_stats=(0, std ** 2), max_channel_offset=max_time_offset, **data_gen_params)
                     if all([abs(nested_list_max(l)) <= config['scaling']['max_r'] for l in measurements_list]) \
-                       and is_in_bay(source_locs, bathym, map_origin, dx, dy):
+                       and sim_data_checks.is_in_bay(source_locs, bathym, map_origin, dx, dy):
                         break
                 source_locs_list.append(source_locs)
                 measurements_set_list.append(measurements_list)
@@ -349,17 +205,16 @@ def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_mea
                 progress(results)
             results = client.gather(results)
 
-            #with Pool(processes=100) as pool:
-            #    results = pool.starmap(monte_carlo, tqdm(zip(source_locs_list, measurements_set_list, itertools.repeat(localizer_params)), total=n, disable=args.background, postfix={'max_time_offset' : max_time_offset, 'std' : std}))
-
             # save values
             theta_list = []
             theta_hat_list = []
             success_list = []
+            num_OOB_list = []
             for result in results:
                 success_list.append(result["path_detected"])
                 theta_list.append(result["theta"])
                 theta_hat_list.append(result["theta_hat"])
+                num_OOB_list.append(result["num_OOB"])
             
             df = pd.concat([df, pd.DataFrame({
                 "k" : [localizer_params_final["k"] for _ in range(n)],
@@ -371,6 +226,7 @@ def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_mea
                 "success_rate" : success_list,
                 "theta" : theta_list,
                 "theta_hat" : theta_hat_list,
+                "num_OOB": num_OOB_list,
             })])
 
     return df
@@ -453,12 +309,9 @@ if __name__ == "__main__":
     axs[0].set_title("Bearing Error")
     axs[0].legend(title='max channel offset [s]')
     axs[0].set_axisbelow(True)
-    # sns.stripplot(data=df, ax=axs[0], x="std", y="theta_error", hue="max_time_offset", palette=sns.color_palette("tab10"), dodge=True)
-    # axs[0].legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
 
-    theta_err_dict = dict()
-    vals = np.zeros((len(std_list), len(max_time_offset_list)))
-    annot = np.zeros((len(std_list), len(max_time_offset_list)))
+    unsupervised_per = np.zeros((len(std_list), len(max_time_offset_list)))
+    # annot = np.zeros((len(std_list), len(max_time_offset_list)))
     for i, std in enumerate(std_list):
         for j, toff in enumerate(max_time_offset_list):
         
@@ -468,16 +321,17 @@ if __name__ == "__main__":
             err = d["theta_error"]
             
             # calculate IQR
-            q1 = np.percentile(err, 25)
-            q3 = np.percentile(err, 75)
-            IQR = q3 - q1
+            # q1 = np.percentile(err, 25)
+            # q3 = np.percentile(err, 75)
+            # IQR = q3 - q1
 
             # get
-            vals[i, j] = np.percentile(err[err > 1.5*IQR], 90)
-            annot[i, j] = len(err[err > 1.5*IQR]) / len(err) 
+            # vals[i, j] = np.percentile(err[err > 1.5*IQR], 90)
+            # annot[i, j] = len(err[err > 1.5*IQR]) / len(err) 
+            unsupervised_per[i,j] = np.percentile(err, 95)
 
-    sns.heatmap(vals,
-                annot=annot,
+    sns.heatmap(unsupervised_per,
+                # annot=annot,
                 xticklabels=max_time_offset_list,
                 yticklabels=std_list,
                 cbar_kws={'label': '90th Percentile Outliers'},
@@ -486,7 +340,6 @@ if __name__ == "__main__":
     axs[1].set_ylabel("Measurement Standard Deviation [m]")
     axs[1].invert_yaxis()
 
-
     for i, ax in enumerate(axs):
         if i == 1:
             continue
@@ -494,8 +347,9 @@ if __name__ == "__main__":
 
     if args.save_figs:
         figs[0].savefig(os.path.join(fig_path, "theta_error.png"))
-        figs[1].savefig(os.path.join(fig_path, "outlier_analysis.png"))
+        figs[1].savefig(os.path.join(fig_path, "unsupervised_percentile.png"))
 
     # make table of means and stds
-    dff = df.groupby(by=['std', 'max_time_offset']).agg({'theta_error' : ['mean', 'std']})
+    dff = df.groupby(by=['std', 'max_time_offset']).agg({'theta_error' : ['mean', 'std'],
+                                                         'num_OOB': ['mean', 'std'],})
     print(dff)
