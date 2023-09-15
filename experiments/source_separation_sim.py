@@ -37,10 +37,71 @@ if args.suppress_warnings:
     warnings.filterwarnings("ignore")
 
 def filter_oob_locs(locs, buffer=15000):
-    idx = np.where((config['scaling']['min_y'] - buffer <= locs[:,0]) & (locs[:,0] <= (config['scaling']['max_y'] + buffer)) & (config['scaling']['min_x'] - buffer <= locs[:,1]) & (locs[:,1] <= (config['scaling']['max_x'] + buffer)))[0]
+    """
+    Filter out locations that are outside of the specified training region
+    with a specified buffer.
+
+    Parameters
+    ----------
+    locs : array-like, of shape N X 2
+        locations to filter
+    buffer : float
+        how much to buffer out the sides of the training region
+
+    Return
+    ------
+    locs : array-like, of shape M X 2
+        filter locations
+    : int
+        how many locations were filtered out
+    """
+    
+    idx = np.where((config['scaling']['min_y'] - buffer <= locs[:,0]) & \
+                   (locs[:,0] <= (config['scaling']['max_y'] + buffer)) & \
+                   (config['scaling']['min_x'] - buffer <= locs[:,1]) & \
+                   (locs[:,1] <= (config['scaling']['max_x'] + buffer)))[0]
     return locs[idx,:], len(locs) - len(idx)
 
 def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data_gen_params):
+    """
+    Run an instance of the monte carlo simulation.
+
+    Parameters
+    ----------
+    measurements_list : List[array-like]
+        list of lists of measurements collected on all sensors
+    s_assocs : List[array-like]
+        same shape as range_measurements. each sublist contains numbers which associate the
+        range_measurement in the corresponding spot in the data structure with a source.
+    t_assocs : List[array-like]
+        same shape as range_measurements. each sublist contains numbers which associate the
+        range_measurement in the corresponding spot in the data structure with a TOSSIT.
+    s_locs : array-like, of shape N X 2
+        source locations in the path
+    localizer_params : dict
+        dictionary of parameters for localizer object
+        - k : int --> k value for group-k consistency check
+        - multilat : MultilaterationBase --> instantiated multilateration object to use
+        - consistency_thresh : float --> dict which maps std --> group-k threshhold
+        - prune : bool --> ensure that all measurements in k-1 subgroups intersect to count as a consistent set
+    data_gen_params : dict
+        dictionary of parameters for sparse source generation
+        - num_delete : int --> maximum number of farthest range measuremnets to delete for a given source (chosen from uniform distribution)
+        - rng : numpy.random._generator.Generator --> RNG object
+        - in_sensors : bool --> whether or not to generate soure locations only in the sensor network
+
+    Returns
+    -------
+    results : dict
+        results dictionary
+        - over_predict_sources : bool --> whether or not more sources were predicted than exist
+        - FN : bool --> there were sources to detect, but none were detected
+        - FP : bool --> there were no soures to detect (or insufficient measurments), but something was detected
+        - percent_possible_detections : float --> percentage of detectable sources that were detected
+        - localization error : List[float] --> list of localization errors
+        - best_localization_error : List[float] --> list of localization errors for detected sources assuming known data association
+        - num_OOB : int --> number of estimated source locations out of bounds of the region
+    """
 
     # initialize results dict
     results = {

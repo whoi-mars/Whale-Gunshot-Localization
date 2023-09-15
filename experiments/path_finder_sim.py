@@ -152,7 +152,11 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
         list of measurements collected at each source location in the path
         on all sensors
     localizer_params : dict
-        dictionary of loclizer object parameters
+        dictionary of parameters for localizer object
+        - k : int --> k value for group-k consistency check
+        - multilat : MultilaterationBase --> instantiated multilateration object to use
+        - consistency_thresh : float --> dict which maps std --> group-k threshhold
+        - prune : bool --> ensure that all measurements in k-1 subgroups intersect to count as a consistent set
 
     Returns
     -------
