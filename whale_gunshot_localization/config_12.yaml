@@ -3,6 +3,7 @@ dataset:
   entry_keys: [T, data, fs, labels, t_dec_max, t_dec_min, class_labels, range_labels]
   exp_data_directory: "/media/mark/extradrive2/TOSSIT_experimental_data"
   ccb_data_directory: "/media/mark/extradrive3/CCB_2023/acoustics"
+  ccb_visual_sightings: "/media/mark/extradrive3/CCB_2023/visual_sightings/CCS-A_20230408-20230426_RIWH Sightings.xlsx"
   exp_data_file: ""
   sandbox_data_file: ""
   noise_data: "ccb_noise_2023.h5"
