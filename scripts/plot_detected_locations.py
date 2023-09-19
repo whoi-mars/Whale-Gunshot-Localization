@@ -99,6 +99,17 @@ if __name__ == "__main__":
         locs_comp = np.stack([lat, lon], axis=1)
 
         # plot locations by day
-        plotting.plot_localization(locs_est, locs_comp=locs_comp, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_{date.date()}.png"), dates=date.date(), bins=0.05, d_lat=0.2, d_lon=0.2, compare_latlon=True)
+        plotting.plot_localization(locs_est=locs_est, 
+                                   locs_comp=locs_comp, 
+                                   title_est="CCB-2023 Acoustic Detections", 
+                                   title_comp="CCB-2023 Visual Detections",
+                                   save=os.path.join(fig_dir, f"locations_{date.date()}.png"), 
+                                   dates=date.date(), 
+                                   buffer=7500, 
+                                   bins=4000, 
+                                   d_lat=0.2, 
+                                   d_lon=0.2,
+                                   est_latlon=False, 
+                                   compare_latlon=True)
         # all_dates.append(date.date())
         # all_locs_est.append(locs_est)

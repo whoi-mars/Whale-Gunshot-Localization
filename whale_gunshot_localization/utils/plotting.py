@@ -6,7 +6,7 @@ import pyproj as proj
 
 from whale_gunshot_localization import config
 
-def plot_localization(locs_est, locs_comp=None, buffer=6000, title=None, dates=None, bins=None, d_lat=0.1, d_lon=0.1, compare_latlon=False, save=None): 
+def plot_localization(locs_est, locs_comp=None, buffer=6000, title_est=None, title_comp=None, dates=None, bins=None, d_lat=0.1, d_lon=0.1, est_latlon=False, compare_latlon=False, save=None): 
     """
     Plot estimated source locations.
 
@@ -48,6 +48,7 @@ def plot_localization(locs_est, locs_comp=None, buffer=6000, title=None, dates=N
         else:
             dates = [dates]
     
+    # assert the inputs match properly and set the number of subplots
     if locs_comp:
         assert len(locs_comp) == len(locs_est) == len(dates), "locs_est, locs_comp, and dates lists must have a one-to-one correspondence"
         n_subplots = 2
@@ -70,78 +71,103 @@ def plot_localization(locs_est, locs_comp=None, buffer=6000, title=None, dates=N
     max_y = config['scaling']['max_y']
 
     # define projection objectalgorithm_sandbox
-    pargs = proj.Proj(proj="aeqd", lat_0=41.9108, lon_0=-70.4292, datum="WGS84", units="m")
+    # pargs = proj.Proj(proj="aeqd", lat_0=config['TOSSIT']['map_origin_latlon'][0], lon_0=config['TOSSIT']['map_origin_latlon'][1], datum="WGS84", units="m")
 
-    # convert sensor locs to lat/lon
-    lon_TOSSIT, lat_TOSSIT = pargs(TOSSIT_locations[:,1], -TOSSIT_locations[:,0], inverse=True)
-
+    # instantiate subplots
     ax = fig.add_subplot(111 if n_subplots == 1 else 211)
-    ax.set_title("Acoustic Detections")
+    ax.set_title(title_est)
 
     # define basemap
     width = abs(config['scaling']['max_x'] - config['scaling']['min_x']) + 2*buffer
     height = abs(config['scaling']['max_y'] - config['scaling']['min_y']) + 2*buffer
     m = Basemap(width=width, height=height, projection='aeqd',
-                lat_0=41.9108, lon_0=-70.4292, resolution="f")
-    lon, lat = pargs([-width / 2, width / 2], [-height / 2, height / 2], inverse=True)
-
+                lat_0=config['TOSSIT']['map_origin_latlon'][0], lon_0=config['TOSSIT']['map_origin_latlon'][1], resolution="f", ellps="WGS84")
     # fill background.
-    m.drawmapboundary(fill_color='white')
+    m.drawmapboundary(fill_color='aqua' if bins is None else 'white')
     # draw coasts and fill continents.
     m.drawcoastlines(linewidth=0.8)
-    m.fillcontinents(color='white',lake_color='white')
+    m.fillcontinents(color='coral' if bins is None else 'white',lake_color='aqua' if bins is None else 'white')
 
+    # define the x/y offsets because Basemap defines the origin in the lower left of the map
+    x_offset = width / 2
+    y_offset = height / 2
 
-    m.plot(lon_TOSSIT, lat_TOSSIT, 'g^', markeredgecolor='black', latlon=True, label='sensors')
+    # get lon/lat of map edges
+    lon, lat = m([(-width / 2) + x_offset, (width / 2) + x_offset], [(-height / 2) + y_offset, (height / 2) + y_offset], inverse=True)
+
+    # plot sensors
+    m.plot(TOSSIT_locations[:,1] + x_offset, -TOSSIT_locations[:,0] + y_offset, 'g^', markeredgecolor='black', latlon=False, label='sensors')
     
     for i, l in enumerate(locs_est):
-        lon_est, lat_est = pargs(l[:,1], -l[:,0], inverse=True)
+        if est_latlon:
+            # convert lat/lon to x/y bins so we can bin if we need to
+            x, y = l[:,1], l[:,0]
+            x, y = m(x, y)
+        else:
+            x, y = l[:,1] + x_offset, -l[:,0] + y_offset
+        
         if bins:
-            H, x_edges, y_edges = np.histogram2d(lat_est, lon_est, bins=[np.arange(min(lat), max(lat) + bins, bins), np.arange(min(lon), max(lon) + bins, bins)])
+            # bin the locs
+            bins_list = [np.arange(0, height + bins, bins), np.arange(0, width + bins, bins)]
+            H, x_edges, y_edges = np.histogram2d(y, x, bins=bins_list)
+            
+            # make heatmap
             xx, yy = np.meshgrid(y_edges, x_edges)
-            colormesh = m.pcolormesh(xx, yy, H / np.max(H), latlon=True, cmap='summer')
-        m.plot(lon_est, lat_est, 'x', color=(colors[i][0], colors[i][1], colors[i][2]), latlon=True, label=f'estimate ({dates[i]})' if dates[0] else 'estimate')
+            colormesh = m.pcolormesh(xx, yy, H / np.max(H), latlon=est_latlon, cmap='summer')
+        
+        # plot points
+        m.plot(x, y, 'x', color=(colors[i][0], colors[i][1], colors[i][2]), latlon=est_latlon, label=f'estimate ({dates[i]})' if dates[0] else 'estimate')
 
-    cb = m.colorbar(colormesh, location='right', label="Normalized Detections")
+    # colorbar
+    if bins:
+        cb = m.colorbar(colormesh, location='right', label="Normalized Detections")
 
+    # mark lat/lons and draw legend
     m.drawparallels(np.arange(np.floor(lat[0]), np.ceil(lat[1]), d_lat), labels=[1, 0, 0, 0], color="None")
     m.drawmeridians(np.arange(np.floor(lon[0]), np.ceil(lon[1]), d_lon), labels=[0, 0, 0, 1], color="None")
     plt.legend(loc='upper left')
 
     if locs_comp:
         ax = fig.add_subplot(212)
-        ax.set_title("Visual Detections")
+        ax.set_title(title_comp)
 
         # define basemap
-        width = abs(config['scaling']['max_x'] - config['scaling']['min_x']) + 2*buffer
-        height = abs(config['scaling']['max_y'] - config['scaling']['min_y']) + 2*buffer
         m = Basemap(width=width, height=height, projection='aeqd',
-                    lat_0=41.9108, lon_0=-70.4292, resolution="f")
-        lon, lat = pargs([-width / 2, width / 2], [-height / 2, height / 2], inverse=True)
-
+                    lat_0=config['TOSSIT']['map_origin_latlon'][0], lon_0=config['TOSSIT']['map_origin_latlon'][1], resolution="f")
         # fill background.
-        m.drawmapboundary(fill_color='white')
+        m.drawmapboundary(fill_color='aqua' if bins is None else 'white')
         # draw coasts and fill continents.
         m.drawcoastlines(linewidth=0.8)
-        m.fillcontinents(color='white',lake_color='white')
+        m.fillcontinents(color='coral' if bins is None else 'white',lake_color='aqua' if bins is None else 'white')
 
-
-        m.plot(lon_TOSSIT, lat_TOSSIT, 'g^', markeredgecolor='black', latlon=True, label='sensors')
+        # plot sensors
+        m.plot(TOSSIT_locations[:,1] + x_offset, -TOSSIT_locations[:,0] + y_offset, 'g^', markeredgecolor='black', latlon=False, label='sensors')
 
         for i, l in enumerate(locs_comp):
             if compare_latlon:
-                lat_vis, lon_vis = l[:,0], l[:,1]
+                # convert lat/lon to x/y bins so we can bin if we need to
+                x, y = l[:,1], l[:,0]
+                x, y = m(x, y)
             else:
-                lon_vis, lat_vis = pargs(l[:,1], -l[:,0], inverse=True)
+                x, y = l[:,1] + x_offset, -l[:,0] + y_offset
 
             if bins:
-                H, x_edges, y_edges = np.histogram2d(lat_vis, lon_vis, bins=[np.arange(min(lat), max(lat) + bins, bins), np.arange(min(lon), max(lon) + bins, bins)])
+                # bin the locs
+                bins_list = [np.arange(0, height + bins, bins), np.arange(0, width + bins, bins)]                
+                H, x_edges, y_edges = np.histogram2d(y, x, bins=bins_list)
+                
+                # make heatmap
                 xx, yy = np.meshgrid(y_edges, x_edges)
-                colormesh = m.pcolormesh(xx, yy, H / np.max(H), latlon=True, cmap='summer')
-        m.plot(lon_vis, lat_vis, 'x', color=(colors[i][0], colors[i][1], colors[i][2]), latlon=True, label=f'estimate ({dates[i]})' if dates[0] else 'estimate')
+                colormesh = m.pcolormesh(xx, yy, H / np.max(H), latlon=False, cmap='summer')
+        
+        # plot points
+        m.plot(x, y, 'x', color=(colors[i][0], colors[i][1], colors[i][2]), latlon=False, label=f'estimate ({dates[i]})' if dates[0] else 'estimate')
 
-        cb = m.colorbar(colormesh, location='right', label="Normalized Detections")
+        # colorbar
+        if bins:
+            cb = m.colorbar(colormesh, location='right', label="Normalized Detections")
 
+        # mark lat/lons and draw legend
         m.drawparallels(np.arange(np.floor(lat[0]), np.ceil(lat[1]), d_lat), labels=[1, 0, 0, 0], color="None")
         m.drawmeridians(np.arange(np.floor(lon[0]), np.ceil(lon[1]), d_lon), labels=[0, 0, 0, 1], color="None")
         plt.legend(loc='upper left')

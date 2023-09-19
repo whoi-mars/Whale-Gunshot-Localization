@@ -19,6 +19,7 @@ TOSSIT:
   dx: 68.9446
   dy: 92.6621
   map_origin: [4947, 19885, ]
+  map_origin_latlon: [41.9108, -70.4292, ]
 signal:
   fs: 600 # [Hz]
   # fs: 1200 # [Hz]
