@@ -55,67 +55,6 @@ if args.scan:
     else:
         print("WARNING: Could not find GPU. Using CPU only.", flush=True)
 
-# def plot_localization(locs_est, buffer=6000, title=None, dates=None, save=None, legend_transparency=0): 
-#     """
-#     Plot estimated source locations.
-
-#     Parameters
-#     ----------
-#     locs_est : List[np.array], with each subarray of shape N X 2
-#         list of lists of estimated locations where the first column stores the Y
-#         coordinate and the second stores the X coordinates
-#     buffer : float
-#         how much to plot outside of the limits established in the config file
-#     title : str
-#         plot title
-#     dates : List[datetime.datetime]
-#         list of dates associated with each sublist of location estiamtes
-#         in locs_est
-#     save : str
-#         path at which to save the plot if desired
-#     """
-
-#     # format inputs
-#     if not isinstance(locs_est, list):
-#         locs_est = [locs_est]
-#     if not isinstance(dates, list):
-#         dates = [dates]
-#     assert len(locs_est) == len(dates), "locs_est and dates lists must have a one-to-one correspondence"
-
-#     # random list of color for plotting
-#     rng = np.random.default_rng(1111)
-#     colors = [rng.uniform(0, 255, size=3) for _ in range(len(locs_est))]
-
-#     # load constants
-#     TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-#     min_x = config['scaling']['min_x']
-#     max_x = config['scaling']['max_x']
-#     min_y = config['scaling']['min_y']
-#     max_y = config['scaling']['max_y']
-
-#     # define projection object
-#     pargs = proj.Proj(proj="aeqd", lat_0=41.9108, lon_0=-70.4292, datum="WGS84", units="m")
-    
-#     # get lon/lat bounds for the map
-#     lon, lat = pargs([min_x-buffer, max_x+buffer], [min_y-buffer, max_y+buffer], inverse=True)
-#     region = [*lon, *lat]
-
-#     # convert sensor locs to lat/lon
-#     lon_TOSSIT, lat_TOSSIT = pargs(TOSSIT_locations[:,1], -TOSSIT_locations[:,0], inverse=True)
-
-#     fig = pygmt.Figure()
-#     fig.basemap(region=region, projection="M15c", frame=True)
-#     fig.coast(land="black", water="skyblue4")
-#     fig.plot(x=lon_TOSSIT, y=lat_TOSSIT, style="t0.3c", fill="green", pen="black", label="sensors")
-#     for i, l in enumerate(locs_est):
-#         lon_est, lat_est = pargs(l[:,1], -l[:,0], inverse=True)
-#         fig.plot(x=lon_est, y=lat_est, style="x0.3c", pen=f"1p,{colors[i][0]}/{colors[i][1]}/{colors[i][2]}", label=f'estimate ({dates[i]})' if dates[0] else 'estimate')
-    
-#     fig.legend(transparency=legend_transparency)
-
-#     if save is not None:
-#         fig.savefig(save)
-
 def has_len(x):
     """
     Checks if an array is empty    
@@ -275,7 +214,7 @@ if __name__ == '__main__':
     # get files associated with first sensor in ordered_sensors list
     wav_files = []
     for s in args.ordered_sensors:
-        wav_files.extend(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], args.ordered_sensors[0], "*.wav")))
+        wav_files.extend(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], s, "*.wav")))
     wav_files = np.asarray(wav_files)
 
     # sort wav files in chonological order by start time
@@ -343,9 +282,9 @@ if __name__ == '__main__':
 
         # plot locations by day
         locs_est = np.stack([y, x], axis=1)
-        plotting.plot_localization(locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_{date.date()}.png"), dates=date.date(), bins=5)
+        plotting.plot_localization(locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_{date.date()}.png"), dates=date.date(), bins=10, d_lat=0.2, d_lon=0.1)
         all_dates.append(date.date())
         all_locs_est.append(locs_est)
         
     # plot all days
-    plotting.plot_localization(all_locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_all_dates.png"), dates=all_dates, legend_transparency=70, bins=5)
+    plotting.plot_localization(all_locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_all_dates.png"), dates=all_dates, bins=10, d_lat=0.2, d_lon=0.1)
