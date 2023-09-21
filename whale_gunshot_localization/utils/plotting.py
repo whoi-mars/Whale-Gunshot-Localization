@@ -1,5 +1,6 @@
 from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
+from matplotlib.colors import Colormap
 
 import numpy as np
 import pyproj as proj
@@ -21,8 +22,10 @@ def plot_localization(locs_est, locs_comp=None, buffer=6000, title_est=None, tit
     buffer : float
         how much to plot outside of the limits established in the config file on either side
         of the width and height
-    title : str
-        plot title
+    title_est : str
+        title for the estimated locations
+    title_comp : str
+        title for the locations for comparison
     dates : List[datetime.datetime] or datetime.datatime
         list of dates associated with each sublist of location estiamtes
         in locs_est
@@ -30,6 +33,8 @@ def plot_localization(locs_est, locs_comp=None, buffer=6000, title_est=None, tit
         distance between lattitudes on the y-axis ticks
     d_lon : float
         distance between longitudes on the x-axis ticks
+    est_latlon : bool
+        whether locs_est are provided in lat/lon (True) or X/Y (False)
     compare_latlon : bool
         whether locs_comp are provided in lat/lon (True) or X/Y (False)
     save : str
@@ -110,10 +115,14 @@ def plot_localization(locs_est, locs_comp=None, buffer=6000, title_est=None, tit
             # bin the locs
             bins_list = [np.arange(0, height + bins, bins), np.arange(0, width + bins, bins)]
             H, x_edges, y_edges = np.histogram2d(y, x, bins=bins_list)
-            
+            H = H / np.max(H)
+            # H[H == 0] = np.nan
+
             # make heatmap
             xx, yy = np.meshgrid(y_edges, x_edges)
-            colormesh = m.pcolormesh(xx, yy, H / np.max(H), latlon=est_latlon, cmap='summer')
+            cmap = plt.get_cmap('summer')
+            # cmap.set_bad("white")
+            colormesh = m.pcolormesh(xx, yy, H, latlon=est_latlon, cmap=cmap)
         
         # plot points
         m.plot(x, y, 'x', color=(colors[i][0], colors[i][1], colors[i][2]), latlon=est_latlon, label=f'estimate ({dates[i]})' if dates[0] else 'estimate')
@@ -155,10 +164,14 @@ def plot_localization(locs_est, locs_comp=None, buffer=6000, title_est=None, tit
                 # bin the locs
                 bins_list = [np.arange(0, height + bins, bins), np.arange(0, width + bins, bins)]                
                 H, x_edges, y_edges = np.histogram2d(y, x, bins=bins_list)
+                H = H / np.max(H)
+                # H[H == 0] = np.nan
                 
                 # make heatmap
                 xx, yy = np.meshgrid(y_edges, x_edges)
-                colormesh = m.pcolormesh(xx, yy, H / np.max(H), latlon=False, cmap='summer')
+                cmap = plt.get_cmap('summer')
+                # cmap.set_bad("white")
+                colormesh = m.pcolormesh(xx, yy, H, latlon=False, cmap=cmap)
         
         # plot points
         m.plot(x, y, 'x', color=(colors[i][0], colors[i][1], colors[i][2]), latlon=False, label=f'estimate ({dates[i]})' if dates[0] else 'estimate')
@@ -175,4 +188,4 @@ def plot_localization(locs_est, locs_comp=None, buffer=6000, title_est=None, tit
     if save is not None:
         plt.savefig(save)
     
-    plt.close()
+    return fig
