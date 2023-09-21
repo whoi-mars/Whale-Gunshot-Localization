@@ -1,3 +1,7 @@
+"""
+Script to plot acoustically derived whale locations and compare to visual estimates.
+"""
+
 import os
 import glob
 import datetime
@@ -12,11 +16,19 @@ import whale_gunshot_localization.utils.experimental as experimental
 
 parser = argparse.ArgumentParser(description="Plot Localization Results")
 parser.add_argument('--start', type=lambda ts : datetime.datetime.strptime(ts, '%Y-%m-%d %H:%M:%S'), default=None,
-                    help='start timestamp of scan')
+                    help='start timestamp of plot data')
 parser.add_argument('--end', type=lambda ts : datetime.datetime.strptime(ts, '%Y-%m-%d %H:%M:%S'), default=None,
-                    help='start timestamp of scan')
-# parser.add_argument('--compare', action='store_true',
-#                     help='Compare acoustic detections to visual detections when detections for the same day exist.')
+                    help='start timestamp of plot data')
+parser.add_argument('--compare', action='store_true',
+                    help='Compare acoustic detections to visual detections when detections for the same day exist')
+parser.add_argument('--bins', type=lambda x: None if x == 'None' else float(x), default=5000,
+                    help='height/width of bins for heatmap of detections (meters)')
+parser.add_argument('--d_lat', type=float, default=0.2,
+                    help='delta in the latitude ticks on the y-axis (decimal degrees)')
+parser.add_argument('--d_lon', type=float, default=0.2,
+                    help='delta in the longitude ticks on the x-axis (decimal degrees)')
+parser.add_argument('--buffer', type=float, default=7500,
+                    help='buffer the height/width of the map frame (meters)')
 args = parser.parse_args()
 
 def set_start_end_times(args):
@@ -64,21 +76,17 @@ if __name__ == "__main__":
     df["bin"] = pd.to_datetime(pd.cut(pd.DatetimeIndex(df["global_timestamp"]), bins=bins_dt, labels=bins_dt[:-1]))
     df_vis["bin"] = df_vis["DATE"]
 
-    # save row from days in common between visual and acoustic detections
-    df_vis = df_vis[df_vis['bin'].isin(df['bin'])]
-    df = df[df['bin'].isin(df_vis['bin'])]
+    for date_bin in bins_dt:
 
-    # all_locs_est = []
-    # all_locs_est_vis = []
-    # all_dates = []
-    bin_grouped = df.groupby(by="bin")
-    bin_grouped_vis = df_vis.groupby(by="bin")
-    for acoustic_grouped, visual_grouped in zip(bin_grouped, bin_grouped_vis):
+        # get date-associated entries for each df
+        dfg_bin = df[df["bin"] == date_bin]
+        dfg_bin_vis = df_vis[df_vis["bin"] == date_bin]
 
-        # unpack dfs
-        _, dfg_bin = acoustic_grouped
-        _, dfg_bin_vis = visual_grouped
+        # if there are no acoustic detections move on
+        if dfg_bin.empty:
+            continue
 
+        # group acoustic detections by id
         id_grouped = dfg_bin.groupby(by="id")
 
         # get acoustic location estimates for a particular bin/day
@@ -92,24 +100,29 @@ if __name__ == "__main__":
                 date = dfg.loc[0,"bin"]
         locs_est = np.stack([y, x], axis=1)
 
-        lon, lat = [], []
-        for _, row in dfg_bin_vis.iterrows():
-            lat += [row['LATITUDE']] * row['NUMBER']
-            lon += [row['LONGITUDE']] * row['NUMBER']
-        locs_comp = np.stack([lat, lon], axis=1)
+        # if available and we want to compare, get visual detections
+        if not dfg_bin_vis.empty and args.compare:
+            lon, lat = [], []
+            for _, row in dfg_bin_vis.iterrows():
+                lat += [row['LATITUDE']] * row['NUMBER']
+                lon += [row['LONGITUDE']] * row['NUMBER']
+            locs_comp = np.stack([lat, lon], axis=1)
+        else:
+            locs_comp = None
 
         # plot locations by day
-        plotting.plot_localization(locs_est=locs_est, 
+        fig = plotting.plot_localization(locs_est=locs_est, 
                                    locs_comp=locs_comp, 
                                    title_est="CCB-2023 Acoustic Detections", 
                                    title_comp="CCB-2023 Visual Detections",
                                    save=os.path.join(fig_dir, f"locations_{date.date()}.png"), 
                                    dates=date.date(), 
-                                   buffer=7500, 
-                                   bins=4000, 
-                                   d_lat=0.2, 
-                                   d_lon=0.2,
+                                   buffer=args.buffer, 
+                                   bins=args.bins, 
+                                   d_lat=args.d_lat, 
+                                   d_lon=args.d_lon,
                                    est_latlon=False, 
                                    compare_latlon=True)
+
         # all_dates.append(date.date())
         # all_locs_est.append(locs_est)
