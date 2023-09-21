@@ -244,47 +244,47 @@ if __name__ == '__main__':
         # perform scanning
         scan_experimental_data(model, args.start, args.end, 2 * args.half_window, args.overlap_fraction, args.ordered_sensors, args.background)
 
-    ###################################
-    #           plot results          #
-    ###################################
+    # ###################################
+    # #           plot results          #
+    # ###################################
 
-    fig_dir = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "detection_maps")
-    Path(fig_dir).mkdir(exist_ok=True, parents=True)
+    # fig_dir = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "detection_maps")
+    # Path(fig_dir).mkdir(exist_ok=True, parents=True)
     
-    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "multi_scan_results.csv")
-    if not os.path.exists(csv_path):
-        raise IOError("no results file")
-    df = pd.read_csv(csv_path)
+    # csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "multi_scan_results.csv")
+    # if not os.path.exists(csv_path):
+    #     raise IOError("no results file")
+    # df = pd.read_csv(csv_path)
 
-    # get bin edges
-    bins_dt = pd.date_range(start=pd.to_datetime(start_time_dict[wav_files[0]]).date(), end=(pd.to_datetime(end_time_dict[wav_files[-1]]) + pd.Timedelta(1, "d")).date(), freq="D")
-    df["bin"] = pd.to_datetime(pd.cut(pd.DatetimeIndex(df["global_timestamp"]), bins=bins_dt, labels=bins_dt[:-1]))
-    bin_grouped = df.groupby(by="bin")
+    # # get bin edges
+    # bins_dt = pd.date_range(start=pd.to_datetime(start_time_dict[wav_files[0]]).date(), end=(pd.to_datetime(end_time_dict[wav_files[-1]]) + pd.Timedelta(1, "d")).date(), freq="D")
+    # df["bin"] = pd.to_datetime(pd.cut(pd.DatetimeIndex(df["global_timestamp"]), bins=bins_dt, labels=bins_dt[:-1]))
+    # bin_grouped = df.groupby(by="bin")
 
-    # # load map
-    # Image.MAX_IMAGE_PIXELS = 729744000
-    # bathym = Image.open(os.path.join(config['dataset']['data_directory'], "mikesbathym.tif"))
+    # # # load map
+    # # Image.MAX_IMAGE_PIXELS = 729744000
+    # # bathym = Image.open(os.path.join(config['dataset']['data_directory'], "mikesbathym.tif"))
 
-    # make plots
-    all_locs_est = []
-    all_dates = []
-    for _, dfg_bin in bin_grouped:
-        id_grouped = dfg_bin.groupby(by="id")
+    # # make plots
+    # all_locs_est = []
+    # all_dates = []
+    # for _, dfg_bin in bin_grouped:
+    #     id_grouped = dfg_bin.groupby(by="id")
 
-        x, y = [],[]
-        date = None 
-        for _, dfg in id_grouped:
-            dfg = dfg.reset_index()
-            x.append(dfg.loc[0,"x"])
-            y.append(dfg.loc[0,"y"])
-            if date is None:
-                date = dfg.loc[0,"bin"]
+    #     x, y = [],[]
+    #     date = None 
+    #     for _, dfg in id_grouped:
+    #         dfg = dfg.reset_index()
+    #         x.append(dfg.loc[0,"x"])
+    #         y.append(dfg.loc[0,"y"])
+    #         if date is None:
+    #             date = dfg.loc[0,"bin"]
 
-        # plot locations by day
-        locs_est = np.stack([y, x], axis=1)
-        plotting.plot_localization(locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_{date.date()}.png"), dates=date.date(), bins=10, d_lat=0.2, d_lon=0.1)
-        all_dates.append(date.date())
-        all_locs_est.append(locs_est)
+    #     # plot locations by day
+    #     locs_est = np.stack([y, x], axis=1)
+    #     plotting.plot_localization(locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_{date.date()}.png"), dates=date.date(), bins=10, d_lat=0.2, d_lon=0.1)
+    #     all_dates.append(date.date())
+    #     all_locs_est.append(locs_est)
         
-    # plot all days
-    plotting.plot_localization(all_locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_all_dates.png"), dates=all_dates, bins=10, d_lat=0.2, d_lon=0.1)
+    # # plot all days
+    # plotting.plot_localization(all_locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_all_dates.png"), dates=all_dates, bins=10, d_lat=0.2, d_lon=0.1)
