@@ -27,8 +27,10 @@ parser.add_argument('--d_lat', type=float, default=0.2,
                     help='delta in the latitude ticks on the y-axis (decimal degrees)')
 parser.add_argument('--d_lon', type=float, default=0.2,
                     help='delta in the longitude ticks on the x-axis (decimal degrees)')
-parser.add_argument('--buffer', type=float, default=7500,
+parser.add_argument('--buffer', type=float, default=8000,
                     help='buffer the height/width of the map frame (meters)')
+parser.add_argument('--points', action='store_true',
+                    help='whether to plot the location points (True) or not (False)')
 args = parser.parse_args()
 
 def set_start_end_times(args):
@@ -111,18 +113,23 @@ if __name__ == "__main__":
             locs_comp = None
 
         # plot locations by day
-        fig = plotting.plot_localization(locs_est=locs_est, 
-                                   locs_comp=locs_comp, 
-                                   title_est="CCB-2023 Acoustic Detections", 
-                                   title_comp="CCB-2023 Visual Detections",
-                                   save=os.path.join(fig_dir, f"locations_{date.date()}.png"), 
-                                   dates=date.date(), 
-                                   buffer=args.buffer, 
-                                   bins=args.bins, 
-                                   d_lat=args.d_lat, 
-                                   d_lon=args.d_lon,
-                                   est_latlon=False, 
-                                   compare_latlon=True)
+        fig = plotting.plot_localization_binary(locs_est=locs_est, 
+                                                locs_comp=locs_comp, 
+                                                title_est="CCB-2023 Detections", 
+                                                title_comp="CCB-2023 Visual Detections",
+                                                save=os.path.join(fig_dir, f"locations_{date.date()}.png"), 
+                                                dates=date.date(), 
+                                                buffer=args.buffer, 
+                                                bins=args.bins, 
+                                                d_lat=args.d_lat, 
+                                                d_lon=args.d_lon,
+                                                est_latlon=False, 
+                                                compare_latlon=True,
+                                                sensors=False,
+                                                one_plot=True,
+                                                points=args.points,
+                                                est_name='acoustic',
+                                                comp_name='visual')
 
         # all_dates.append(date.date())
         # all_locs_est.append(locs_est)
