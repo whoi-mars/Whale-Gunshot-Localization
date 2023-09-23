@@ -1,5 +1,5 @@
 """
-Script to plot acoustically derived whale locations and compare to visual estimates.
+Script to plot and compare acoustically derived whale locations and visual estimates.
 """
 
 import os
@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import argparse
+import matplotlib.pyplot as plt
 
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 import whale_gunshot_localization.utils.plotting as plotting
@@ -19,8 +20,6 @@ parser.add_argument('--start', type=lambda ts : datetime.datetime.strptime(ts, '
                     help='start timestamp of plot data')
 parser.add_argument('--end', type=lambda ts : datetime.datetime.strptime(ts, '%Y-%m-%d %H:%M:%S'), default=None,
                     help='start timestamp of plot data')
-parser.add_argument('--compare', action='store_true',
-                    help='Compare acoustic detections to visual detections when detections for the same day exist')
 parser.add_argument('--bins', type=lambda x: None if x == 'None' else float(x), default=5000,
                     help='height/width of bins for heatmap of detections (meters)')
 parser.add_argument('--d_lat', type=float, default=0.2,
@@ -78,17 +77,25 @@ if __name__ == "__main__":
     df["bin"] = pd.to_datetime(pd.cut(pd.DatetimeIndex(df["global_timestamp"]), bins=bins_dt, labels=bins_dt[:-1]))
     df_vis["bin"] = df_vis["DATE"]
 
-    for date_bin in bins_dt:
+    # save row from days in common between visual and acoustic detections
+    df_vis = df_vis[df_vis['bin'].isin(df['bin'])]
+    df = df[df['bin'].isin(df_vis['bin'])]
 
-        # get date-associated entries for each df
-        dfg_bin = df[df["bin"] == date_bin]
-        dfg_bin_vis = df_vis[df_vis["bin"] == date_bin]
+    bin_grouped = df.groupby(by="bin")
+    bin_grouped_vis = df_vis.groupby(by="bin")
+    
+    assert len(bin_grouped), "There are no common dates between the acoustic and visual data to compare."
 
-        # if there are no acoustic detections move on
-        if dfg_bin.empty:
-            continue
+    fig, axs = plt.subplots(1, len(bin_grouped))
+    if not isinstance(axs, np.ndarray):
+        axs = np.asarray([[axs]])
 
-        # group acoustic detections by id
+    for i, (acoustic_grouped, visual_grouped) in enumerate(zip(bin_grouped, bin_grouped_vis)):
+
+        # unpack dfs
+        _, dfg_bin = acoustic_grouped
+        _, dfg_bin_vis = visual_grouped
+
         id_grouped = dfg_bin.groupby(by="id")
 
         # get acoustic location estimates for a particular bin/day
@@ -102,34 +109,26 @@ if __name__ == "__main__":
                 date = dfg.loc[0,"bin"]
         locs_est = np.stack([y, x], axis=1)
 
-        # if available and we want to compare, get visual detections
-        if not dfg_bin_vis.empty and args.compare:
-            lon, lat = [], []
-            for _, row in dfg_bin_vis.iterrows():
-                lat += [row['LATITUDE']] * row['NUMBER']
-                lon += [row['LONGITUDE']] * row['NUMBER']
-            locs_comp = np.stack([lat, lon], axis=1)
-        else:
-            locs_comp = None
+        lon, lat = [], []
+        for _, row in dfg_bin_vis.iterrows():
+            lat += [row['LATITUDE']] * row['NUMBER']
+            lon += [row['LONGITUDE']] * row['NUMBER']
+        locs_comp = np.stack([lat, lon], axis=1)
 
         # plot locations by day
-        fig = plotting.plot_localization_binary(locs_est=locs_est, 
-                                                locs_comp=locs_comp, 
-                                                title_est="CCB-2023 Detections", 
-                                                title_comp="CCB-2023 Visual Detections",
-                                                save=os.path.join(fig_dir, f"locations_{date.date()}.png"), 
-                                                dates=date.date(), 
-                                                buffer=args.buffer, 
-                                                bins=args.bins, 
-                                                d_lat=args.d_lat, 
-                                                d_lon=args.d_lon,
-                                                est_latlon=False, 
-                                                compare_latlon=True,
-                                                sensors=False,
-                                                one_plot=True,
-                                                points=args.points,
-                                                est_name='acoustic',
-                                                comp_name='visual')
+        plotting.one_plot_comparison(locs_est=locs_est,
+                                     locs_comp=locs_comp,
+                                     ax=axs[0,i],
+                                     title=f"CCB 2023 Detections - {date.date()}",
+                                     buffer=args.buffer,
+                                     bins=args.bins,
+                                     d_lat=args.d_lat,
+                                     d_lon=args.d_lon,
+                                     est_latlon=False,
+                                     compare_latlon=True,
+                                     sensors=False,
+                                     points=args.points,
+                                     est_name='acoustic',
+                                     comp_name='visual')
 
-        # all_dates.append(date.date())
-        # all_locs_est.append(locs_est)
+    fig.savefig(os.path.join(fig_dir, f"locations_{date.date()}.png"))
