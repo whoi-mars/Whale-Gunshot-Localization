@@ -46,7 +46,14 @@ parser.add_argument('--scan', action='store_true',
                     help='whether to scan or just plot')
 parser.add_argument('-b', '--background', action='store_true',
                     help='silence the progress bar')
+parser.add_argument('--suppress_warnings', action='store_true',
+                    help="tell Python to suppress warnings")
 args = parser.parse_args()
+
+# suppress warnings
+if args.suppress_warnings:
+    import warnings
+    warnings.filterwarnings("ignore")
 
 if args.scan:
     device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
@@ -171,7 +178,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
                     if success:
                         # assocaite/localize
                         assocs, locs_est = l.associate_and_localize(method='partition', reduce_dups=False, last_step=True)
-                        
+
                         # flatten outputs
                         ranges_flat, timestamps_flat = [], []
                         sensor_map = {}
