@@ -13,8 +13,61 @@ from PIL import Image
 from whale_gunshot_localization.utils.experimental import calculate_GDOP_locs
 from whale_gunshot_localization import config
 
-def plot_localization_time_comparison(locs_est, locs_comp, est_times, comp_times, comp_path, comp_path_times, ax=None, buffer=6000, title=None, d_lat=0.1, d_lon=0.1, est_latlon=False, comp_latlon=False, points=False, sensors=False, est_name='est', comp_name='comp'):
+def plot_localization_time_comparison(locs_est, locs_comp, est_times, comp_times, comp_path, comp_path_times, ax=None, buffer=6000, title=None, d_lat=0.1, d_lon=0.1, est_latlon=False, comp_latlon=False, sensors=False, est_name='est', comp_name='comp'):
+    """
+    Plot both visually and acoustically obtained location estimates of whales
+    that exist within the duration of the flight that obtained the visual estimates.
+    The flight path is also plotted. This can only be done if there is at least one
+    acoustic detection during the flight
 
+    Parameters
+    ----------
+    locs_est : np.array, of shape N X 2
+        list of lists of estimated locations where the first column stores the Y
+        coordinate and the second stores the X coordinates
+    locs_comp : np.array, of shape M X 2
+        list of lists of estimated locations where the first column stores the Y
+        coordinate and the second stores the X coordinates
+    est_times : List[datetime.datetime]
+        list of datetime objects which correspond to the acoustic detections in
+        locs_est
+    comp_times : List[datetime.datatime]
+        list of datetime objects which correspond to the visual detections in
+        locs_comp
+    comp_path : np.array, of shape K X 2
+        the path of the plane that took the visual measuremnets went.
+        the first column has latitudes and the second has longitudes.
+    comp_path_times : List[datetime.datatime]
+        list of datatimes associated with the flight path
+    ax : Axis
+        axis to put the plot on
+    buffer : float
+        how much to plot outside of the limits established in the config file on either side
+        of the width and height
+    title : str
+        plot title
+    d_lat : float
+        distance between lattitudes on the y-axis ticks
+    d_lon : float
+        distance between longitudes on the x-axis ticks
+    est_latlon : bool
+        whether locs_est are provided in lat/lon (True) or X/Y (False)
+    comp_latlon : bool
+        whether locs_comp are provided in lat/lon (True) or X/Y (False)
+    sensors : bool
+        whether or not to plot the sensors
+    est_name : str
+        name of the type of estimate
+    comp_name : str
+        name of the type of comparison
+
+    Returns
+    -------
+    : bool
+        whether or not there were common acoustic and visual detections during the flight duration
+    : figure
+        either None or a figure object depending on if an axis object was passed
+    """
     # filter points to be within the duration of the comp_path
     est_times_new = []
     comp_times_new = []
@@ -95,29 +148,32 @@ def plot_localization_time_comparison(locs_est, locs_comp, est_times, comp_times
         x_c, y_c = locs_comp[:,1] + x_offset, -locs_comp[:,0] + y_offset
         x_p, y_p = comp_path[:,1] + x_offset, -comp_path[:,0] + y_offset
 
+    # plot flightpath color coded by time
     tmin = np.min(comp_path_times)
-    if comp_path_times is None:
-        m.plot(x_p, y_p, latlon=False, label="flight path")
-    else:
-        colors_cpt = np.asarray([(cpt - tmin).total_seconds() for cpt in comp_path_times])
-        norm = np.max(colors_cpt)
-        colors_cpt /= norm
+    #if comp_path_times is None:
+    #    m.plot(x_p, y_p, latlon=False, label="flight path")
+    #else:
+    colors_cpt = np.asarray([(cpt - tmin).total_seconds() for cpt in comp_path_times])
+    norm = np.max(colors_cpt)
+    colors_cpt /= norm
 
-        path_points = np.array([x_p, y_p]).T.reshape(-1, 1, 2)
-        segments = np.concatenate([path_points[:-1], path_points[1:]], axis=1)
-        lc = LineCollection(segments, cmap='viridis', norm=plt.Normalize(colors_cpt.min(), colors_cpt.max()), zorder=1)
-        lc.set_array(colors_cpt)
-        lc.set_linewidth(0.5)
-        line = ax.add_collection(lc)
+    path_points = np.array([x_p, y_p]).T.reshape(-1, 1, 2)
+    segments = np.concatenate([path_points[:-1], path_points[1:]], axis=1)
+    lc = LineCollection(segments, cmap='viridis', norm=plt.Normalize(colors_cpt.min(), colors_cpt.max()), zorder=1)
+    lc.set_array(colors_cpt)
+    lc.set_linewidth(0.5)
+    line = ax.add_collection(lc)
 
-    if est_times is not None and comp_times is not None:
-        ct_diff = np.asarray([(ct - tmin).total_seconds() for ct in comp_times])
-        et_diff = np.asarray([(et - tmin).total_seconds() for et in est_times])
 
-        colors_ct = ct_diff / norm
-        colors_et = et_diff / norm
-    else:
-        colors_ct, colors_et = None, None
+    # plot detections color coded by time
+    # if est_times is not None and comp_times is not None:
+    ct_diff = np.asarray([(ct - tmin).total_seconds() for ct in comp_times])
+    et_diff = np.asarray([(et - tmin).total_seconds() for et in est_times])
+
+    colors_ct = ct_diff / norm
+    colors_et = et_diff / norm
+    # else:
+    #     colors_ct, colors_et = None, None
 
     sp1 = m.scatter(x, y, marker='P', s=36, label=f"{est_name} esimate", c=colors_et, norm=lc.norm, edgecolors='black', linewidth=0.25, zorder=3)
     sp2 = m.scatter(x_c, y_c, marker='o', s=36, label=f"{comp_name} estimate", c=colors_ct, norm=lc.norm, edgecolors='black', linewidth=0.25, zorder=2)
@@ -133,10 +189,6 @@ def plot_localization_time_comparison(locs_est, locs_comp, est_times, comp_times
         new_handles = [Line2D([0], [0], marker='P', markerfacecolor='black', markeredgecolor='black', markersize=6, ls=''), \
                        Line2D([0], [0], marker='o', markerfacecolor='black', markeredgecolor='black', markersize=6, ls='')]
     ax.legend(new_handles, labels, loc='lower left')
-    # leg.legendHandles[0].set_color('black')
-    # leg.legendHandles[1].set_color('black')
-    # leg.legendHandles[0].set_facecolor('black')
-    # leg.legendHandles[1].set_facecolor('black')
 
     if return_fig:
         return True, fig
@@ -165,8 +217,7 @@ def plot_localization(locs_est, ax=None, buffer=6000, title=None, bins=None, d_l
         distance between lattitudes on the y-axis ticks
     d_lon : float
         distance between longitudes on the x-axis ticks
-    est_latlon : bool    #     TL_transform = np.concatenate((TOSSIT_locations[:,[1]] + x_offset, -TOSSIT_locations[:,[0]] + y_offset), axis=1)
-
+    est_latlon : bool
         whether locs_est are provided in lat/lon (True) or X/Y (False)
     points : bool
         whether to plot the location points (True) or not (False)

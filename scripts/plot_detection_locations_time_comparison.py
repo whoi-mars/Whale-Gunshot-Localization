@@ -1,5 +1,6 @@
 """
-Script to plot and compare acoustically derived whale locations and visual estimates.
+Script to plot and compare acoustically derived whale locations and visual estimates
+in a spatio temporal way relative to the time of the flight that got the visual detections.
 """
 
 import os
@@ -20,19 +21,34 @@ parser.add_argument('--start', type=lambda ts : datetime.datetime.strptime(ts, '
                     help='start timestamp of plot data')
 parser.add_argument('--end', type=lambda ts : datetime.datetime.strptime(ts, '%Y-%m-%d %H:%M:%S'), default=None,
                     help='start timestamp of plot data')
-parser.add_argument('--bins', type=lambda x: None if x == 'None' else float(x), default=5000,
-                    help='height/width of bins for heatmap of detections (meters)')
-parser.add_argument('--d_lat', type=float, default=0.2,
+parser.add_argument('--d_lat', type=float, default=0.1,
                     help='delta in the latitude ticks on the y-axis (decimal degrees)')
-parser.add_argument('--d_lon', type=float, default=0.2,
+parser.add_argument('--d_lon', type=float, default=0.1,
                     help='delta in the longitude ticks on the x-axis (decimal degrees)')
-parser.add_argument('--buffer', type=float, default=10000,
+parser.add_argument('--buffer', type=float, default=15000,
                     help='buffer the height/width of the map frame (meters)')
-parser.add_argument('--points', action='store_true',
-                    help='whether to plot the location points (True) or not (False)')
 args = parser.parse_args()
 
 def set_start_end_times(args):
+    """
+    Properly set the start and end times for plotting from the argparse input dict
+
+    Parameters
+    ----------
+    args : dict
+        an argparse dictionary which contains the keys 'start', 'end'
+
+    Returns
+    -------
+    args : dict
+        original args input with updated 'start' and 'end' KVPs
+    start_time_dict : dict
+        dictionary which maps wave file name to start time
+    end_time_dict : dict
+        dictionary which maps wave file name to end time
+    wav_files : List[str]
+        list of wav file names in chronological order
+    """
 
     # get files associated with first sensor in ordered_sensors list
     wav_files = []
@@ -127,7 +143,7 @@ if __name__ == "__main__":
             lat += [row['LATITUDE']] * row['NUMBER']
             lon += [row['LONGITUDE']] * row['NUMBER']
             str_time = str(row["TIME (GMT)"])
-            comp_time += [row["DATE"].replace(hour=int(str_time[:2]) - 4, minute=int(str_time[2:4]), second=int(str_time[4:])).to_pydatetime()] * row['NUMBER']
+            comp_time += [row["DATE"].replace(hour=int(str_time[:2]), minute=int(str_time[2:4]), second=int(str_time[4:])).to_pydatetime()] * row['NUMBER']
         locs_comp = np.stack([lat, lon], axis=1)
 
         path_lon, path_lat = [], []
@@ -136,7 +152,7 @@ if __name__ == "__main__":
             path_lat.append(row['LATITUDE'])
             path_lon.append(row['LONGITUDE'])
             str_time = str(row["TIME (GMT)"])
-            path_time.append(row["DATE"].replace(hour=int(str_time[:2]) - 4, minute=int(str_time[2:4]), second=int(str_time[4:])).to_pydatetime())
+            path_time.append(row["DATE"].replace(hour=int(str_time[:2]), minute=int(str_time[2:4]), second=int(str_time[4:])).to_pydatetime())
         locs_path = np.stack([path_lat, path_lon], axis=1)
 
         success, _ = plotting.plot_localization_time_comparison(locs_est, 
@@ -146,13 +162,12 @@ if __name__ == "__main__":
                                           locs_path,
                                           path_time, 
                                           ax=axs[0,i], 
-                                          buffer=15000, 
+                                          buffer=args.buffer, 
                                           title=f"{date.date()}", 
-                                          d_lat=0.1, 
-                                          d_lon=0.1, 
+                                          d_lat=args.d_lat, 
+                                          d_lon=args.d_lon, 
                                           est_latlon=False,
                                           comp_latlon=True, 
-                                          points=False, 
                                           sensors=True, 
                                           est_name='acoustic', 
                                           comp_name='visual')
