@@ -5,6 +5,7 @@ import warnings
 
 from bs4 import BeautifulSoup
 import numpy as np
+import numpy.matlib as matlib
 import torch
 from scipy.signal import resample_poly, find_peaks
 from scipy.optimize import least_squares
@@ -254,7 +255,7 @@ class MultilaterationOpt(MultilaterationBase):
         H_hat = D - (q.T @ q)*np.eye(2)
 
         dist = math_tools.matrix_similarity(H, H_hat)
-        if dist < self.method_thresh:
+        if np.isnan((q + c).squeeze().flatten()).sum() or dist < self.method_thresh:
             cost, loc = self._opt(ranges, sensors_idx)
             return cost, loc
         
@@ -666,6 +667,7 @@ class Localizer:
                             best_loc = loc
                     
                     # update association
+
                     associations[a_idx] = best_assoc
                     locs[a_idx] = best_loc         
 
@@ -725,6 +727,69 @@ class Localizer:
         if reduce_dups:
             associations, locs = self._eliminate_dups(locs, associations, thresh=self.dup_thresh)
         return associations, locs
+
+#######################################################################################################################
+#                                             Sensor Network Metrics                                                  #
+#######################################################################################################################
+
+def calculate_GDOP_map(x_vec, y_vec, TOSSIT_locs):
+    
+    # initialize matrix for GDOP results
+    GDOP = np.zeros((len(y_vec), len(x_vec)))
+
+    # make meshgrid to calculate GDOP over
+    X, Y = np.meshgrid(x_vec, y_vec)
+
+    # create a meshgrid for each sensor
+    X_3d = np.tile(X[:,:,np.newaxis], (1, 1, TOSSIT_locs.shape[0]))
+    Y_3d = np.tile(Y[:,:,np.newaxis], (1, 1, TOSSIT_locs.shape[0]))
+
+    # calculate distances between sample points
+    sensors_y = np.reshape(TOSSIT_locs[:,1], (1, 1, TOSSIT_locs.shape[0]))
+    sensors_x = np.reshape(TOSSIT_locs[:,0], (1, 1, TOSSIT_locs.shape[0]))
+
+    R = np.sqrt(((sensors_x - X_3d) ** 2) + ((sensors_y - Y_3d) ** 2))
+
+    # calculate normalized position vectors
+    X_3d_div = (sensors_x - X_3d) / R
+    Y_3d_div = (sensors_y - Y_3d) / R
+
+    # calculate GDOP
+    for i in range(GDOP.shape[0]):
+        for j in range(GDOP.shape[1]):
+            A = np.stack((X_3d_div[i, j, :], Y_3d_div[i, j, :]), axis=1)
+            try:
+                Q = (1000 ** 2) * np.linalg.inv(A.T @ A)
+            except:
+                Q = (1000 ** 2) * np.linalg.pinv(A.T @ A)
+                print(i, j)
+            GDOP[i, j] = np.sqrt(np.trace(Q))
+
+    return GDOP
+
+def calculate_GDOP_locs(x, y, TOSSIT_locs, TOSSIT_IDs):
+
+    GDOP = np.zeros((len(x),))
+
+    for i, (px, py, Tids) in enumerate(zip(x, y, TOSSIT_IDs)):
+
+        sensors_y = np.reshape(TOSSIT_locs[Tids,1], (1, 1, len(Tids)))
+        sensors_x = np.reshape(TOSSIT_locs[Tids,0], (1, 1, len(Tids)))
+
+        R = np.sqrt(((sensors_x - px) ** 2) + ((sensors_y - py) ** 2))
+
+        x_div = (sensors_x - px) / R
+        y_div = (sensors_y - py) / R
+
+        A = np.stack((x_div.squeeze(), y_div.squeeze()), axis=1)
+        try:
+            Q = (1000 ** 2) * np.linalg.inv(A.T @ A)
+        except:
+            Q = (1000 ** 2) * np.linalg.pinv(A.T @ A)
+        GDOP[i] = np.sqrt(np.trace(Q))
+
+    return GDOP
+
 
 #######################################################################################################################
 #                                                  WAV File Tools                                                     #
