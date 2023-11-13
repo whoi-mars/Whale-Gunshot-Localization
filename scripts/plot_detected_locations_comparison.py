@@ -26,7 +26,7 @@ parser.add_argument('--d_lat', type=float, default=0.2,
                     help='delta in the latitude ticks on the y-axis (decimal degrees)')
 parser.add_argument('--d_lon', type=float, default=0.2,
                     help='delta in the longitude ticks on the x-axis (decimal degrees)')
-parser.add_argument('--buffer', type=float, default=8000,
+parser.add_argument('--buffer', type=float, default=10000,
                     help='buffer the height/width of the map frame (meters)')
 parser.add_argument('--points', action='store_true',
                     help='whether to plot the location points (True) or not (False)')
@@ -72,29 +72,38 @@ if __name__ == "__main__":
     # load visual RW identifications
     df_vis = pd.read_excel(config['dataset']['ccb_visual_sightings'])
 
+    # load plane paths
+    df_flightpath = pd.read_excel(config['dataset']['ccb_visual_flightpath'])
+
     # get bin edges
     bins_dt = pd.date_range(start=pd.to_datetime(start_time_dict[wav_files[0]]).date(), end=(pd.to_datetime(end_time_dict[wav_files[-1]]) + pd.Timedelta(1, "d")).date(), freq="D")
     df["bin"] = pd.to_datetime(pd.cut(pd.DatetimeIndex(df["global_timestamp"]), bins=bins_dt, labels=bins_dt[:-1]))
     df_vis["bin"] = df_vis["DATE"]
+    df_flightpath["bin"] = df_flightpath["DATE"]
 
     # save row from days in common between visual and acoustic detections
     df_vis = df_vis[df_vis['bin'].isin(df['bin'])]
     df = df[df['bin'].isin(df_vis['bin'])]
+    df_flightpath = df_flightpath[df_flightpath['bin'].isin(df['bin'])]
 
     bin_grouped = df.groupby(by="bin")
     bin_grouped_vis = df_vis.groupby(by="bin")
+    bin_grouped_flightpath = df_flightpath.groupby(by="bin")
     
     assert len(bin_grouped), "There are no common dates between the acoustic and visual data to compare."
 
-    fig, axs = plt.subplots(1, len(bin_grouped))
+    fig, axs = plt.subplots(1, len(bin_grouped), figsize=(18, 10))
     if not isinstance(axs, np.ndarray):
         axs = np.asarray([[axs]])
+    elif len(axs.shape) == 1:
+        axs = axs[np.newaxis,:]
 
-    for i, (acoustic_grouped, visual_grouped) in enumerate(zip(bin_grouped, bin_grouped_vis)):
+    for i, (acoustic_grouped, visual_grouped, flightpath_grouped) in enumerate(zip(bin_grouped, bin_grouped_vis, bin_grouped_flightpath)):
 
         # unpack dfs
         _, dfg_bin = acoustic_grouped
         _, dfg_bin_vis = visual_grouped
+        _, dfg_bin_flightpath = flightpath_grouped
 
         id_grouped = dfg_bin.groupby(by="id")
 
@@ -115,11 +124,18 @@ if __name__ == "__main__":
             lon += [row['LONGITUDE']] * row['NUMBER']
         locs_comp = np.stack([lat, lon], axis=1)
 
+        path_lon, path_lat = [], []
+        for _, row in dfg_bin_flightpath.iterrows():
+            path_lat.append(row['LATITUDE'])
+            path_lon.append(row['LONGITUDE'])
+        locs_path = np.stack([path_lat, path_lon], axis=1)
+
         # plot locations by day
         plotting.one_plot_comparison(locs_est=locs_est,
                                      locs_comp=locs_comp,
+                                     comp_path=locs_path,
                                      ax=axs[0,i],
-                                     title=f"CCB 2023 Detections - {date.date()}",
+                                     title=f"{date.date()}",
                                      buffer=args.buffer,
                                      bins=args.bins,
                                      d_lat=args.d_lat,
@@ -131,4 +147,5 @@ if __name__ == "__main__":
                                      est_name='acoustic',
                                      comp_name='visual')
 
-    fig.savefig(os.path.join(fig_dir, f"locations_{date.date()}.png"))
+    fig.tight_layout()
+    fig.savefig(os.path.join(fig_dir, "location_comparison.png"))
