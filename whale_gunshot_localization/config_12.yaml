@@ -23,13 +23,9 @@ TOSSIT:
   cell_lon: 8.333306759595871e-04
 signal:
   fs: 600 # [Hz]
-  # fs: 1200 # [Hz]
   T: 6 # [s]
 stft:
   window: "hann"
-  # nperseg: 62
-  #noverlap: 48
-  # nfft: 926
   nperseg: 62
   noverlap: 53
   nfft: 463
