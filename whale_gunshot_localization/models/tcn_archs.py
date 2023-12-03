@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 from torch.nn.utils import weight_norm
+from whale_gunshot_localization.models.fcn import FCN
 
 ##################################################################
 #                       TCN Building Blocks                      #
@@ -117,6 +118,23 @@ class TemporalConvNet(nn.Module):
 ##################################################################
 #                           TCN Model                            #
 ##################################################################
+
+class TCNRangeAndClassifyCond(nn.Module):
+    """
+    TCN with multiple TCN/linear layers.
+    """
+    
+    def __init__(self, input_size, num_channels, kernel_size, dropout, cond_size):
+        super(TCNRangeAndClassifyCond, self).__init__()
+        self.tcn = BranchedTemporalConvNet(input_size, num_channels, kernel_size=kernel_size, dropout=dropout)
+        self.FCN1 = FCN(n_hidden=1, h_size=512, i_size=num_channels[-1], o_size=1)
+        self.FCN2 = FCN(n_hidden=1, h_size=512, i_size=num_channels[-1] + cond_size, o_size=2)
+
+    def forward(self, inputs, cond):
+        x = self.tcn(inputs)
+        x1 = self.FCN1(x[0][:,:,-1])
+        x2 = self.FCN2(torch.cat((x[1][:,:,-1], cond), dim=1))
+        return torch.cat((x1, x2), dim=1)
 
 class TCNClassifier(nn.Module):
     """
