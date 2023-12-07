@@ -127,28 +127,15 @@ class TCNRangeAndClassifyCond(nn.Module):
     def __init__(self, input_size, num_channels, kernel_size, dropout, cond_size):
         super(TCNRangeAndClassifyCond, self).__init__()
         self.tcn = BranchedTemporalConvNet(input_size, num_channels, kernel_size=kernel_size, dropout=dropout)
-        self.FCN1 = FCN(n_hidden=1, h_size=512, i_size=num_channels[-1], o_size=1)
-        self.FCN2 = FCN(n_hidden=1, h_size=512, i_size=num_channels[-1] + cond_size, o_size=2)
+        self.FCN1 = FCN(n_hidden=2, h_size=512, i_size=num_channels[-1], o_size=1)
+        self.FCN2 = FCN(n_hidden=2, h_size=512, i_size=2*num_channels[-1], o_size=2)
+        self.embeddings = FCN(n_hidden=2, h_size=512, i_size=cond_size, o_size=num_channels[-1])
 
     def forward(self, inputs, cond):
         x = self.tcn(inputs)
         x1 = self.FCN1(x[0][:,:,-1])
-        x2 = self.FCN2(torch.cat((x[1][:,:,-1], cond), dim=1))
+        x2 = self.FCN2(torch.cat((x[1][:,:,-1], self.embeddings(cond)), dim=1))
         return torch.cat((x1, x2), dim=1)
-
-class TCNClassifier(nn.Module):
-    """
-    TCN with linear output layers.
-    """
-
-    def __init__(self, input_size, num_channels, kernel_size, dropout):
-        super(TCNClassifier, self).__init__()
-        self.tcn = TemporalConvNet(input_size, num_channels, kernel_size=kernel_size, dropout=dropout)
-        self.linear = nn.Linear(num_channels[-1], 1)
-
-    def forward(self, inputs):
-        x = self.tcn(inputs)
-        return self.linear(x[:,:,-1])
 
 class TCNRangeAndClassify(nn.Module):
     """
@@ -160,23 +147,6 @@ class TCNRangeAndClassify(nn.Module):
         self.tcn = BranchedTemporalConvNet(input_size, num_channels, kernel_size=kernel_size, dropout=dropout)
         self.linear1 = nn.Linear(num_channels[-1], 1)
         self.linear2 = nn.Linear(num_channels[-1], 2)
-
-    def forward(self, inputs):
-        x = self.tcn(inputs)
-        x1 = self.linear1(x[0][:,:,-1])
-        x2 = self.linear2(x[1][:,:,-1])
-        return torch.cat((x1, x2), dim=1)
-
-class TCNRangeAndClassifyUncertain(nn.Module):
-    """
-    TCN with multiple TCN/linear layers.
-    """
-    
-    def __init__(self, input_size, num_channels, kernel_size, dropout):
-        super(TCNRangeAndClassifyUncertain, self).__init__()
-        self.tcn = BranchedTemporalConvNet(input_size, num_channels, kernel_size=kernel_size, dropout=dropout)
-        self.linear1 = nn.Linear(num_channels[-1], 2)
-        self.linear2 = nn.Linear(num_channels[-1], 3)
 
     def forward(self, inputs):
         x = self.tcn(inputs)
