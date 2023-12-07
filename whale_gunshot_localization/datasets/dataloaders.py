@@ -6,7 +6,7 @@ import h5py
 import numpy as np
 
 from whale_gunshot_localization.utils.transformations import to_spect, random_wrap
-from whale_gunshot_localization.datasets.samplers import H5BatchSampler, UniformGridH5BatchSampler
+from whale_gunshot_localization.datasets.samplers import H5BatchSampler
 from whale_gunshot_localization import config
 
 class SimDataRangeClassify(data.Dataset):
@@ -86,7 +86,7 @@ class SimDataRangeClassify(data.Dataset):
     def __getitem__(self, idx):
 
         # get data or noise randomly
-        t_ind = 0 # np.random.choice(self.sensors)
+        t_ind = np.random.choice(self.sensors)
         if np.random.choice([0, 1]):
             inputs = self.data[idx,[t_ind]]
             target_c = self._from_numpy(np.asarray([1]))
@@ -117,7 +117,7 @@ class SimDataRangeClassify(data.Dataset):
 
     def _load_h5(self):
         file = h5py.File(config['dataset']['data_directory'] + "/VDS_main.h5", 'r', libver='latest')
-        file_n = h5py.File(config['dataset']['data_directory'] + "/" + config['dataset']['noise_data'])
+        file_n = h5py.File(config['dataset']['data_directory'] + "/" + config['dataset']['noise_data'], 'r', libver='latest')
         return file['data'], file['labels'], file['range_labels'], file_n['data']
 
 class SimDataRangeClassifyEvaluateLocalize(data.Dataset):
@@ -213,13 +213,13 @@ class SimDataRangeClassifyEvaluateLocalize(data.Dataset):
             y_target = self._from_numpy(np.asarray([-1]))
 
         # convert to spectrogram
-        inputs = self._from_numpy(to_spect(inputs).copy())
+        inputs = self._from_numpy(np.ascontiguousarray(to_spect(inputs)))
 
         # transform
         if self.transform is not None:
             for i in range(self.num_TOSSITs):
                 inputs[i,...] = self.transform(inputs[i,...])
-
+        
         # squeeze
         if self.squeeze:
             inputs = inputs.squeeze()
@@ -234,7 +234,7 @@ class SimDataRangeClassifyEvaluateLocalize(data.Dataset):
 
     def _load_h5(self):
         file = h5py.File(config['dataset']['data_directory'] + "/VDS_main.h5", 'r', libver='latest')
-        file_n = h5py.File(config['dataset']['data_directory'] + "/" + config['dataset']['noise_data'])
+        file_n = h5py.File(config['dataset']['data_directory'] + "/" + config['dataset']['noise_data'], 'r', libver='latest')
         return file['data'], file['labels'], file['range_labels'], file_n['data'][:]
 
 ###########################################################
