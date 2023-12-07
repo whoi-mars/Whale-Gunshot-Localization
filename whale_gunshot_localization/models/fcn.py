@@ -14,7 +14,7 @@ class FCN(nn.Module):
         assert n_hidden >= 1, "n_hidden must be >= 1"
         
         linear_list = [nn.Linear(i_size, h_size)]
-        for _ in range(n_hidden):
+        for _ in range(n_hidden-1):
             linear_list += [nn.Linear(h_size, h_size)]
         linear_list += [nn.Linear(h_size, o_size)]
         self.network = nn.Sequential(*linear_list)
