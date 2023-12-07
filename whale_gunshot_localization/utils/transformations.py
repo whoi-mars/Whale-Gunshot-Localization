@@ -35,7 +35,7 @@ def to_spect(x):
 
     # get dB power
     log_spect = 10*np.log10(np.abs(Z) ** 2)
-
+    
     # get dimension where to flip the result and add channel dimension
     channel_dim = len(log_spect.shape) - 2
 
@@ -314,33 +314,6 @@ def get_image_transform(stats=False):
     transform_train = transforms.Compose([
         Normalize1DChannel(mu_list, std_list),
         BlockTOSSIT(3),
-    ])
-
-    return {'train' : transform_train, 'eval' : transform_eval}
-
-def get_image_transform_classify():
-    """
-    Gets dictionary of spectrogram preprocessing transforms for training and evaluation.
-
-    Returns
-    -------
-    dict
-        dictionary with training and evaluation preprocessing transforms
-    """
-
-    # load mean and std
-    mu_list = np.load(config['dataset']['data_directory'] + '/mean_classification.npy', allow_pickle=True)
-    std_list = np.load(config['dataset']['data_directory'] + '/std_classification.npy', allow_pickle=True)
-
-    # evaluation transforms
-    transform_eval = transforms.Compose([
-        Normalize1DChannel(mu_list, std_list),
-    ])
-
-    # training transforms
-    transform_train = transforms.Compose([
-        Normalize1DChannel(mu_list, std_list),
-        FrequencyBandZeroing(max_freq_width=30, num_t=0),
     ])
 
     return {'train' : transform_train, 'eval' : transform_eval}
