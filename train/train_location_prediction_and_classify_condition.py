@@ -242,7 +242,7 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                 inputs = inputs.to(device)
                 targets_c = targets_c.to(device)
                 targets_r = targets_r.to(device)
-                t_ind = F.one_hot(t_ind, num_classes=n_sensors).to(device)
+                t_ind = F.one_hot(t_ind, num_classes=n_sensors).float().to(device)
 
                 # zero out gradient for new batch
                 optimizer.zero_grad()
