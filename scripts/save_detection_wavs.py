@@ -59,7 +59,7 @@ if __name__ == "__main__":
     for i, id in enumerate(config['TOSSIT']['ids']):
         sensor_to_id[int(id)] = i+1
 
-    ID = [44]
+    ID = [3]
     # prepare directory to save images
     wav_dir = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "wavs")
     Path(wav_dir).mkdir(exist_ok=True, parents=True)
