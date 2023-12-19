@@ -44,7 +44,7 @@ parser.add_argument('-o', '--overlap_fraction', type=float, default=0.75, metava
                     help='how much window to overlap when scanning the file (default: 0.75)')
 parser.add_argument('--scan', action='store_true',
                     help='whether to scan or just plot')
-parser.add_argument('-b', '--background', action='store_true',
+parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
 parser.add_argument('--suppress_warnings', action='store_true',
                     help="tell Python to suppress warnings")
@@ -131,7 +131,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
     CA = experimental.ClipAnalyzer(model, data_params, preprocessor=experimental.l2_standardize, device=device)
 
     # prepare localizer object
-    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=0.5), consistency_thresh=2000, prune=False)
+    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=0.95), consistency_thresh=1300, prune=False)
 
     # get starts of chunks to read and total days
     chunk_starts = pd.date_range(start=start, end=end, freq=f"{chunk_size}s")
@@ -195,16 +195,20 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
                         # create dictionary to save results
                         row_dict = {col : [] for col in columns}
                         for i, assoc in enumerate(assocs):
-                            for m in assoc:
-                                row_dict["id"].append(id)
-                                row_dict["sensor"].append(ordered_sensors[sensor_map[m]])
-                                row_dict["file_name"].append(file_list[sensor_map[m]])
-                                row_dict["timestamp"].append(((start_time.to_numpy() + np.timedelta64(int(timestamps_flat[m] * 1000), "ms")) - start_time_dict[row_dict["file_name"][-1]]).astype('timedelta64[s]').astype(float))
-                                row_dict["global_timestamp"].append(experimental.get_wav_timestamp(row_dict["file_name"][-1], int((row_dict["timestamp"][-1]) * 1000)))
-                                row_dict["range"].append(np.around(ranges_flat[m], 2))
-                                row_dict["x"].append(np.around(locs_est[i,1], 2))
-                                row_dict["y"].append(np.around(locs_est[i,0], 2))
-                            id += 1
+                            if locs_est[i,0] >= config['scaling']['min_y'] \
+                               and locs_est[i,0] <= config['scaling']['max_y'] \
+                               and locs_est[i,1] >= config['scaling']['min_x'] \
+                               and locs_est[i,1] <= config['scaling']['max_x']:
+                                for m in assoc:
+                                    row_dict["id"].append(id)
+                                    row_dict["sensor"].append(ordered_sensors[sensor_map[m]])
+                                    row_dict["file_name"].append(file_list[sensor_map[m]])
+                                    row_dict["timestamp"].append(((start_time.to_numpy() + np.timedelta64(int(timestamps_flat[m] * 1000), "ms")) - start_time_dict[row_dict["file_name"][-1]]).astype('timedelta64[s]').astype(float))
+                                    row_dict["global_timestamp"].append(experimental.get_wav_timestamp(row_dict["file_name"][-1], int((row_dict["timestamp"][-1]) * 1000)))
+                                    row_dict["range"].append(np.around(ranges_flat[m], 2))
+                                    row_dict["x"].append(np.around(locs_est[i,1], 2))
+                                    row_dict["y"].append(np.around(locs_est[i,0], 2))
+                                id += 1
 
                         new_row = pd.DataFrame(row_dict)
                         new_row.to_csv(csv_path, mode='a', index=False, header=False)
