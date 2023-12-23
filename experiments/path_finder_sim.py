@@ -31,9 +31,16 @@ parser.add_argument('--simulate', action='store_true',
                     help="simulate rather than use previous results if available (default: false)")
 parser.add_argument('--save_figs', action='store_true',
                     help="save figures (default: false)")
+parser.add_argument('--suppress_warnings', action='store_true',
+                    help="tell Python to suppress warnings")
 parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
 args = parser.parse_args()
+
+# suppress warnings
+if args.suppress_warnings:
+    import warnings
+    warnings.filterwarnings("ignore")
 
 ##################################################
 #               helper functions                 #
@@ -62,6 +69,17 @@ def nested_list_max(l):
             if ll[-1] > maxx:
                 maxx = ll[-1]
     return maxx
+
+def ragged_concat(l):
+    if not isinstance(l[0], np.ndarray):
+        return l
+    else:
+        res = []
+        for sl in l:
+            for e in sl:
+                res.append(e)
+        return np.asarray(res)
+
 
 def filter_oob_locs(locs, buffer=15000):
     """
@@ -140,7 +158,7 @@ def bearing_error(bearing1, bearing2):
 #                  monte carlo                   #
 ##################################################
 
-def monte_carlo(source_locs, measurements_list, localizer_params):
+def monte_carlo(source_locs, measurements_list, source_assocs_list, TOSSIT_associations_list, localizer_params):
     """
     Run an instance of the monte carlo simulation.
 
@@ -172,6 +190,7 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
     results = {"path_detected": False,
                "theta": float('nan'),
                "theta_hat": float('nan'),
+               "best_theta_hat": float('nan'),
                "num_OOB": float('nan'),}
     
     # instantiate localizer
@@ -184,10 +203,21 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
     theta = get_bearing([source_locs[idx1,1], source_locs[idx2,1]], [-source_locs[idx1,0], -source_locs[idx2,0]])
     results["theta"] = theta
 
+    # instantiate localizer for baseline
+    localizer = localizer_params['multilat']
+    TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
+    localizer.set_map({
+        'TOSSIT_locations' : TOSSIT_locations,
+        'min_x' : config['scaling']['min_x'],
+        'max_x' : config['scaling']['max_x'],
+        'min_y' : config['scaling']['min_y'],
+        'max_y' : config['scaling']['max_y'],
+    })
+
     # build hypergraph
+    best_locs = []
     for i, measurement_set in enumerate(measurements_list):
         successful = l.set_measurements(measurement_set, **set_measurement_params)
-
         # if successful localize
         if not successful:
             continue
@@ -199,11 +229,36 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
             assoc, locs_est = l.associate_and_localize(method='partition', reduce_dups=False, last_step=False)
             locs_est, n = filter_oob_locs(locs_est)
             results["num_OOB"] = n
+            assoc_flat = ragged_concat(source_assocs_list[i])
+            measurements_flat = ragged_concat(measurement_set[i])
+            TOSSIT_associations_flat = ragged_concat(TOSSIT_associations_list[i])
+            curr_source_locs_idx = np.asarray(list(set(assoc_flat)), dtype=int)
+            curr_source_locs = source_locs[curr_source_locs_idx]
+
+            # calculate best locations if we know the assocaitions
+            num_ests = min(locs_est.shape[0], len(curr_source_locs_idx))
+            source_loc_combs = np.asarray(list(map(list, itertools.permutations(curr_source_locs))))
+            source_loc_idx_combs = np.asarray(list(map(list, itertools.permutations(curr_source_locs_idx))))
+            errors_matrix = np.sqrt(((source_loc_combs[:,:num_ests,:] - locs_est[np.newaxis,:num_ests,:]) ** 2).sum(axis=2)).sum(axis=1)
+            detected_sources = source_loc_idx_combs[np.argmin(errors_matrix)][:num_ests]
+
+            assoc_flat = ragged_concat(source_assocs_list[i])
+            measurements_flat = ragged_concat(measurement_set)
+            TOSSIT_associations_flat = ragged_concat(TOSSIT_associations_list[i])
+            #print("MF: ", measurements_flat)
+            #print("TF: ", TOSSIT_associations_flat)
+            for sidx in detected_sources:
+                idx = np.where(assoc_flat == sidx)[0]
+                if len(idx) < 3:
+                    continue
+                _, loc = localizer.localize(measurements_flat[idx], TOSSIT_associations_flat[idx].astype(int))
+                best_locs.append(loc)
 
             if i == 0:
                 locs_ests = locs_est
             else:
                 locs_ests = np.append(locs_ests, locs_est, axis=0)
+    best_locs = np.asarray(best_locs)
 
     if results["path_detected"]:
         # make point vectors
@@ -218,6 +273,20 @@ def monte_carlo(source_locs, measurements_list, localizer_params):
         y_ends = pcr.predict(x_ends)
         theta_hat = get_bearing(x_ends.squeeze(), y_ends)
         results["theta_hat"] = theta_hat
+
+        if len(best_locs) > 0:
+            # make point vectors
+            x = best_locs[:, [1]]
+            y = -best_locs[:,0]
+
+            pcr = make_pipeline(StandardScaler(), PCA(n_components=1), LinearRegression())
+            pcr.fit(x, y)
+            pca = pcr.named_steps["pca"]
+
+            x_ends = np.asarray([[np.min(x)], [np.max(x)]])
+            y_ends = pcr.predict(x_ends)
+            theta_hat = get_bearing(x_ends.squeeze(), y_ends)
+            results["best_theta_hat"] = theta_hat
 
     return results
 
@@ -283,6 +352,8 @@ def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_mea
         # change consistency threshold based on measurement variance
         localizer_params_final = localizer_params.copy()
         localizer_params_final['consistency_thresh'] = localizer_params_final['consistency_thresh'][std]
+        localizer_params_final['multilat'] = localizer_params_final['multilat'][std]
+
 
         for max_time_offset in max_time_offset_list:
             if args.background:
@@ -290,21 +361,27 @@ def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_mea
             
             # generate data
             source_locs_list = []
+            source_assocs_set_list = []
             measurements_set_list = []
+            TOSSIT_assocs_set_list = []
             for _ in range(n):
                 while True:
-                    source_locs, measurements_list = sim_datagen.generate_trajectory(measurement_stats=(0, std ** 2), max_channel_offset=max_time_offset, **data_gen_params)
+                    source_locs, measurements_list, source_assocaitions_list, TOSSIT_associations_list = sim_datagen.generate_trajectory(measurement_stats=(0, std ** 2), max_channel_offset=max_time_offset, **data_gen_params)
                     if all([abs(nested_list_max(l)) <= config['scaling']['max_r'] for l in measurements_list]) \
                        and sim_data_checks.is_in_bay(source_locs, bathym, map_origin, dx, dy):
                         break
                 source_locs_list.append(source_locs)
+                source_assocs_set_list.append(source_assocaitions_list)
                 measurements_set_list.append(measurements_list)
+                TOSSIT_assocs_set_list.append(TOSSIT_associations_list)
             
             # delayed for loop using dask
             results = []
             for i in range(n):
                 res = dask.delayed(monte_carlo)(source_locs_list[i],
                                                 measurements_set_list[i],
+                                                source_assocs_set_list[i],
+                                                TOSSIT_assocs_set_list[i],
                                                 localizer_params_final)
                 results.append(res)
 
@@ -317,12 +394,14 @@ def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_mea
             # save values
             theta_list = []
             theta_hat_list = []
+            best_theta_hat_list = []
             success_list = []
             num_OOB_list = []
             for result in results:
                 success_list.append(result["path_detected"])
                 theta_list.append(result["theta"])
                 theta_hat_list.append(result["theta_hat"])
+                best_theta_hat_list.append(result["best_theta_hat"])
                 num_OOB_list.append(result["num_OOB"])
             
             df = pd.concat([df, pd.DataFrame({
@@ -335,6 +414,7 @@ def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_mea
                 "success_rate" : success_list,
                 "theta" : theta_list,
                 "theta_hat" : theta_hat_list,
+                "best_theta_hat" : best_theta_hat_list,
                 "num_OOB": num_OOB_list,
             })])
 
@@ -343,7 +423,7 @@ def monte_carlo_sim(n, max_time_offset_list, std_list, localizer_params, set_mea
 if __name__ == "__main__":
 
     # path for results CSV
-    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder", "path_finder_sim_results_in_sensors.csv")
+    path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder", "path_finder_sim_results.csv")
     fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "path_finder")
 
     # set up results directory
@@ -364,13 +444,13 @@ if __name__ == "__main__":
         rng2 = np.random.default_rng(54321)
 
         # parameters
-        localizer_params = dict(k=4, multilat=MultilaterationOpt(method_thresh=float('inf'), rng=rng1), consistency_thresh={0: 2, 250: 1500, 500: 2500, 750: 3500, 1000: 3500}, prune=False)
+        localizer_params = dict(k=4, multilat={i : MultilaterationOpt(method_thresh=0.95, rng=rng1) for i in [0, 15, 30, 45, 60, 75, 750]}, consistency_thresh={0: 2, 15: 20, 30: 75, 45: 55, 60: 70, 75: 85, 750: 3000}, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
         data_gen_params = dict(rng=rng2, num_points=8, beam_width=0, timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, in_sensors=False)
 
-        df = monte_carlo_sim(n=300,
+        df = monte_carlo_sim(n=100,
                              max_time_offset_list=[0, 10],
-                             std_list=[0, 250, 500, 750, 1000],
+                             std_list=[0, 15, 30, 45, 60, 75, 750],
                              localizer_params=localizer_params,
                              set_measurement_params=set_measurement_params,
                              data_gen_params=data_gen_params)
@@ -408,6 +488,7 @@ if __name__ == "__main__":
     #---------------------------------------------------#
 
     df["theta_error"] = bearing_error(df["theta"], df["theta_hat"]).squeeze().tolist()
+    df["best_theta_error"] = bearing_error(df["theta"], df["best_theta_hat"]).squeeze().tolist()
     sns.boxplot(x=df['std'], 
                 y=df['theta_error'], 
                 hue=df['max_time_offset'], 
@@ -438,12 +519,13 @@ if __name__ == "__main__":
 
             # get error for category
             err = d["theta_error"]
+            err_best = d["best_theta_error"]
             
             # store 95th percentile error
             unsupervised_per[i,j] = np.percentile(err, 90)
 
             _,bins,_ = axx[i,j].hist(err, alpha=0.5, bins=300, label='unsupervised')
-            # axx[i,j].hist(best_location_error_dict[(std,n)] / 1000, alpha=0.5, bins=bins, label='ideal')
+            axx[i,j].hist(err_best, alpha=0.5, bins=bins, label='ideal')
             axx[i,j].set_title(f"$\sigma$={std} m, " + "$t_{offset}$=" + f"{toff} s", fontsize=22)
             axx[i,j].tick_params(axis='x', labelsize=16)
             axx[i,j].tick_params(axis='y', labelsize=16)
@@ -481,6 +563,10 @@ if __name__ == "__main__":
         figg.savefig(os.path.join(fig_path, "hists.png"))
 
     # make table of means and stds
-    dff = df.groupby(by=['std', 'max_time_offset']).agg({'theta_error' : ['mean', 'std'],
+    def perc90(iterable):
+        a = np.asarray(iterable)
+        return np.percentile(a, 90)
+    dff = df.groupby(by=['std', 'max_time_offset']).agg({'theta_error' : ['mean', 'std', perc90],
+                                                         "best_theta_error" : ['mean', 'std', perc90],
                                                          'num_OOB': ['mean', 'std'],})
     print(dff)
