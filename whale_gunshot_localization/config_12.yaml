@@ -39,24 +39,18 @@ stft:
   noverlap: 56 # 53
   nfft: 463
 scaling:
-  # orig
-  # max_x: 36153.303773
-  # min_x: -18318.595602
-  # max_y: 17420.482956
-  # min_y: -20107.685114
-  # max_r: 35028.582
-  # small
-  # max_x: 16625.334399
-  # min_x: -3794.163452
-  # max_y: 2779.864302
-  # min_y: -21682.941552
-  # max_r: 28439.115884
   # small and reduced tossit
-  max_x: 13383.049267
-  min_x: -4690.965723
-  max_y: 2779.864302
-  min_y: -16123.212949
-  max_r: 21777.249126
+  # max_x: 13383.049267
+  # min_x: -4690.965723
+  # max_y: 2779.864302
+  # min_y: -16123.212949
+  # max_r: 21777.249126
+  # 1.5 km around network
+  max_x: 11794.090834
+  min_x: -1517.368411
+  max_y: 1389.932151
+  min_y: -11397.443636
+  max_r: 16394.476413
 models:
   checkpoints_directories: "/media/mark/extradrive2/models"
-  model_dir: "range_classify_small_9_long_stft"
+  model_dir: "range_classify_small_9_1500_boarder_long_stft"
