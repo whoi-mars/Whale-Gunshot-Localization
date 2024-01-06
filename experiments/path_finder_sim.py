@@ -227,8 +227,8 @@ def monte_carlo(source_locs, measurements_list, source_assocs_list, TOSSIT_assoc
 
             # associate/localize
             assoc, locs_est = l.associate_and_localize(method='partition', reduce_dups=False, last_step=False)
-            locs_est, n = filter_oob_locs(locs_est)
-            results["num_OOB"] = n
+            # locs_est, n = filter_oob_locs(locs_est)
+            results["num_OOB"] = float('nan')
             assoc_flat = ragged_concat(source_assocs_list[i])
             measurements_flat = ragged_concat(measurement_set[i])
             TOSSIT_associations_flat = ragged_concat(TOSSIT_associations_list[i])
@@ -448,7 +448,7 @@ if __name__ == "__main__":
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
         data_gen_params = dict(rng=rng2, num_points=8, beam_width=0, timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, in_sensors=False)
 
-        df = monte_carlo_sim(n=100,
+        df = monte_carlo_sim(n=300,
                              max_time_offset_list=[0, 10],
                              std_list=[0, 15, 30, 45, 60, 75, 750],
                              localizer_params=localizer_params,
@@ -526,6 +526,7 @@ if __name__ == "__main__":
 
             _,bins,_ = axx[i,j].hist(err, alpha=0.5, bins=300, label='unsupervised')
             axx[i,j].hist(err_best, alpha=0.5, bins=bins, label='ideal')
+            axx[i,j].set_xlim(0,np.percentile(err, 95))
             axx[i,j].set_title(f"$\sigma$={std} m, " + "$t_{offset}$=" + f"{toff} s", fontsize=22)
             axx[i,j].tick_params(axis='x', labelsize=16)
             axx[i,j].tick_params(axis='y', labelsize=16)
