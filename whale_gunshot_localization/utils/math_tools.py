@@ -41,21 +41,26 @@ def matrix_similarity(A, B):
         matrix similarity metric in [0, 1]
     """
 
-    # make matrices positive
-    A = np.abs(A)
-    B = np.abs(B)
-    
-    # row cosine distances
-    An = A / np.linalg.norm(A, axis=1, keepdims=True)
-    Bn = B / np.linalg.norm(B, axis=1, keepdims=True)
-    row_sim = (An * Bn).sum(axis=1)
-    
-    # column cosine distances
-    An = A / np.linalg.norm(A, axis=0, keepdims=True)
-    Bn = B / np.linalg.norm(B, axis=0, keepdims=True)
-    col_sim = (An * Bn).sum(axis=0)
+    # if orig:
+    #     # make matrices positive
+    #     A = np.abs(A)
+    #     B = np.abs(B)
+        
+    #     # row cosine distances
+    #     An = A / np.linalg.norm(A, axis=1, keepdims=True)
+    #     Bn = B / np.linalg.norm(B, axis=1, keepdims=True)
+    #     row_sim = (An * Bn).sum(axis=1)
+        
+    #     # column cosine distances
+    #     An = A / np.linalg.norm(A, axis=0, keepdims=True)
+    #     Bn = B / np.linalg.norm(B, axis=0, keepdims=True)
+    #     col_sim = (An * Bn).sum(axis=0)
 
-    return np.mean([row_sim, col_sim])
+    #     return np.mean([row_sim, col_sim])
+    # else:
+    A = A / np.linalg.norm(A, ord='fro')
+    B = B / np.linalg.norm(B, ord='fro')
+    return 1 - np.linalg.norm(A - B, ord='fro')
 
 def check_intersection(center_list, r_list):
     """
