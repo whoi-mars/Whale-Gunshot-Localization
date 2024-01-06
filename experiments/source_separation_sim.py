@@ -144,8 +144,8 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data
     results["over_predict_sources"] = False
 
     # calculate number OOB
-    locs_est, n = filter_oob_locs(locs_est)
-    results["num_OOB"] = n
+    # locs_est, n = filter_oob_locs(locs_est)
+    results["num_OOB"] = float('nan')
 
     # if we predict too many sources return
     if locs_est.shape[0] > s_locs.shape[0]:
@@ -318,15 +318,15 @@ if __name__ == "__main__":
         rng2 = np.random.default_rng(1524)
 
         # parameters for localizer and data_generator
-        localizer_params = dict(k=4, multilat={i : MultilaterationOpt(method_thresh=0.95, rng=rng1) for i in [0, 15, 30, 45, 60, 75, 750]}, consistency_thresh={0: 2, 15: 20, 30: 75, 45: 55, 60: 70, 75: 85, 750: 1300}, dup_thresh=2000, prune=False)
+        localizer_params = dict(k=4, multilat={i : MultilaterationOpt(method_thresh=0.95, rng=rng1) for i in [0, 15, 30, 45, 60, 75, 750]}, consistency_thresh={0: 2, 15: 20, 30: 75, 45: 55, 60: 70, 75: 85, 750: 1300}, dup_thresh=1000, prune=False)
         set_measurement_params = dict(adaptive=False, adaptive_max=5000, threshold_delta=500)
         data_gen_params = dict(num_delete=0, rng=rng2, in_sensors=False)
 
         # run MC
-        df = run_monte_carlo(n=100,
+        df = run_monte_carlo(n=300,
                              std_list=[0, 15, 30, 45, 60, 75, 750],
                              num_sources_list=range(1,6),
-                             sparse_distance=500,
+                             sparse_distance=1000,
                              localizer_params=localizer_params,
                              set_measurement_params=set_measurement_params,
                              data_gen_params=data_gen_params)
@@ -386,13 +386,16 @@ if __name__ == "__main__":
                            'loc_error': location_error_list,
                            'best_loc_error': best_location_error_list,
                            'std': std_list,})
-    df.to_csv(os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "data_assoc_and_loc", "test.csv"), index=False)
-
 
     # location stats
     def perc90(iterable):
         a = np.asarray(iterable)
+        a = a[~np.isnan(a)]
         return np.percentile(a, 90)
+    def perc10(iterable):
+        a = np.asarray(iterable)
+        a = a[~np.isnan(a)]
+        return np.percentile(a, 10)
     loc_cols = df_loc.groupby(by=['std', 'num_sources']).agg({'loc_error': ['mean', 'std', perc90], 'best_loc_error': ['mean', 'std', perc90]})
 
     # sns.boxplot(x=df_loc['num_sources'], 
@@ -445,6 +448,7 @@ if __name__ == "__main__":
 
             _,bins,_ = axx[i,j].hist(location_error_dict[(std,n)] / 1000, alpha=0.5, bins=80, label='unsupervised')
             axx[i,j].hist(best_location_error_dict[(std,n)] / 1000, alpha=0.5, bins=bins, label='ideal')
+            axx[i,j].set_xlim(0,np.percentile(location_error_dict[(std,n)][~np.isnan(location_error_dict[(std,n)])] / 1000, 99))
             axx[i,j].set_title(f"n={n}, $\sigma$={std} m", fontsize=22)
             axx[i,j].tick_params(axis='x', labelsize=16)
             axx[i,j].tick_params(axis='y', labelsize=16)
@@ -455,6 +459,8 @@ if __name__ == "__main__":
     figg.subplots_adjust(wspace=0.35, hspace=0.35)
     figg.text(0.5, 0.04, "Localization Error [km]", ha='center', va='center', fontsize=28)
     figg.text(0.05, 0.5, "Example Count", ha='center', va='center', rotation=90, fontsize=28)
+
+    
 
     # sns.heatmap(unsupervised_per / 1000, 
     #             xticklabels=range(num_sources_min, num_sources_max + 1),
@@ -488,7 +494,7 @@ if __name__ == "__main__":
     dff = df.groupby(by=['std', 'num_sources']).agg({'over_predict_sources': ['mean'],
                                                      'FN': ['mean'],
                                                      'FP': ['mean'],
-                                                     'percent_possible_detections': ['mean','std'],
+                                                     'percent_possible_detections': ['mean','std',perc10],
                                                      'num_OOB': ['mean', 'std']})
 
     if args.save_figs:
