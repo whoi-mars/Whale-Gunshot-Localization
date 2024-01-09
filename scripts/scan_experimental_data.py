@@ -176,7 +176,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
 
                     if success:
                         # assocaite/localize
-                        assocs, locs_est = l.associate_and_localize(method='partition', reduce_dups=False, last_step=True)
+                        assocs, locs_est = l.associate_and_localize(reduce_dups=False, last_step=True)
 
                         # flatten outputs
                         ranges_flat, timestamps_flat = [], []
