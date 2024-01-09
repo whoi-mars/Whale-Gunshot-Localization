@@ -27,7 +27,6 @@ import pygmt
 
 from whale_gunshot_localization.models.tcn_archs import TCNRangeAndClassify
 import whale_gunshot_localization.utils.experimental as experimental
-import whale_gunshot_localization.utils.plotting as plotting
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 
 # parse input arguments
@@ -131,7 +130,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
     CA = experimental.ClipAnalyzer(model, data_params, preprocessor=experimental.l2_standardize, device=device)
 
     # prepare localizer object
-    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=0.95), consistency_thresh=1300, prune=False)
+    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=0.95), consistency_thresh=500, prune=False)
 
     # get starts of chunks to read and total days
     chunk_starts = pd.date_range(start=start, end=end, freq=f"{chunk_size}s")
