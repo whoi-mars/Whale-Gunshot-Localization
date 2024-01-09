@@ -138,7 +138,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data
         if not possible:
             results["FP"] = True
             return results
-        assocs_est, locs_est = L.associate_and_localize(method='partition', reduce_dups=True, last_step=True)
+        assocs_est, locs_est = L.associate_and_localize(reduce_dups=True, last_step=True)
 
     # if no FP or FN, set over_predict_sources to False
     results["over_predict_sources"] = False

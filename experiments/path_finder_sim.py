@@ -226,7 +226,7 @@ def monte_carlo(source_locs, measurements_list, source_assocs_list, TOSSIT_assoc
             results["path_detected"] = True
 
             # associate/localize
-            assoc, locs_est = l.associate_and_localize(method='partition', reduce_dups=False, last_step=False)
+            assoc, locs_est = l.associate_and_localize(reduce_dups=False, last_step=False)
             # locs_est, n = filter_oob_locs(locs_est)
             results["num_OOB"] = float('nan')
             assoc_flat = ragged_concat(source_assocs_list[i])

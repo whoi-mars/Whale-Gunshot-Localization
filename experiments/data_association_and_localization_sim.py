@@ -211,7 +211,7 @@ def monte_carlo(measurements, source_associations, TOSSIT_associations, source_l
         return missed_association_count, FP, total_fail_count, float('nan'), float('nan'), float('nan'), float('nan'), float('nan'), float('nan')
 
     # associate and localize
-    assoc, locs = l.associate_and_localize(method='partition', last_step=True)
+    assoc, locs = l.associate_and_localize(last_step=True)
     
     if source_locs.shape[0] == 1:     
         assoc_no_dup, locs_no_dup = delete_dups(assoc, locs)

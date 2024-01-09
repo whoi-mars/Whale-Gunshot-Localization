@@ -673,7 +673,7 @@ class Localizer:
 
         return [assoc for assoc in associations if len(assoc) >= 3], np.asarray([loc for i, loc in enumerate(locs) if len(associations[i]) >= 3])
 
-    def associate_and_localize(self, method='clique', reduce_dups=True, last_step=True):
+    def associate_and_localize(self, reduce_dups=True, last_step=True):
         """
         Using the hypergraph constructed in self.set_measurements, perform data association
         and localization.
@@ -699,19 +699,10 @@ class Localizer:
         # make sure we've set measurements
         assert self.measurements, "measurements have not been set"
         
-        if method == 'clique':
-            associations = []
-            for h in self.H.connected_component_subgraphs():
-                for clique in nx.find_cliques_recursive(h):
-                    if len(clique) >= 3:
-                        associations.append(clique)
-        elif method == 'partition':
-            HG = hmod.precompute_attributes(self.H)
-            associations = hmod.kumar(HG)
-            # if last_step:
-            #     associations = self._last_step(associations)
-        else:
-            raise ValueError("Method must be either 'clique' or 'partition'")
+        HG = hmod.precompute_attributes(self.H)
+        associations = hmod.kumar(HG)
+        # if last_step:
+        #     associations = self._last_step(associations)
 
         locs = []
         for a in associations:
