@@ -45,7 +45,6 @@ for i = 1:length(files)
         fs = audioinfo(files(i)).SampleRate;
         [y,fs] = audioread(files(i),[fs*timestamps(i), fs*(timestamps(i) + T ) - 1]);
         y = resample(y,fs_save,fs);
-        length(y)
         audiowrite(sprintf("gunshot_%d_%d.wav",save_index,idx),y,fs_save);
     end
 end
