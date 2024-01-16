@@ -154,6 +154,10 @@ def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000)
     
     curr_loc = source_locs[[0]]
     measurements = [np.asarray([]) for _ in range(TOSSIT_locations.shape[0])]
+    source_associations = [np.asarray([]) for _ in range(TOSSIT_locations.shape[0])]
+    TOSSIT_associations = [np.asarray([]) for _ in range(TOSSIT_locations.shape[0])]
+
+    s_counter = 0
     while True:
         
         # get measurements
@@ -162,6 +166,9 @@ def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000)
             r = np.linalg.norm(curr_loc - TOSSIT_locations[t,:], axis=1) + \
                 rng.normal(loc=measurement_stats[0], scale=np.sqrt(measurement_stats[1]), size=num_repetitions)
             measurements[t] = np.append(measurements[t], r)
+            source_associations[t] = np.append(source_associations[t], s_counter)
+            TOSSIT_associations[t] = np.append(TOSSIT_associations[t], t)
+        s_counter += 1
 
         if source_locs.shape[0] == num_points:
             break
@@ -193,10 +200,14 @@ def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000)
     
     # split measurements
     measurements_list = []
+    source_assocaitions_list = []
+    TOSSIT_associations_list = []
     pointer = 0
     while pointer <= time_stamps[:,-1].max():
         
         new_measurements = []
+        new_source_associations = []
+        new_TOSSIT_associations = []
         for t in range(TOSSIT_locations.shape[0]):
         
             # get measurements indices of time chunk
@@ -204,11 +215,15 @@ def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000)
 
             # save in list
             new_measurements.append(measurements[t][idx])
+            new_source_associations.append(source_associations[t][idx])
+            new_TOSSIT_associations.append(TOSSIT_associations[t][idx])
 
         # append location measurements to overall list        
         measurements_list.append(new_measurements)
+        source_assocaitions_list.append(new_source_associations)
+        TOSSIT_associations_list.append(new_TOSSIT_associations)
         
         # iterate pointer
         pointer += chunk_size
                         
-    return source_locs, measurements_list
+    return source_locs, measurements_list, source_assocaitions_list, TOSSIT_associations_list

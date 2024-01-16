@@ -11,14 +11,11 @@ import wandb
 import torch
 import torch.nn.functional as F
 
-from whale_gunshot_localization.datasets.dataloaders import get_dataloaders_classify
-from whale_gunshot_localization.utils.transformations import get_image_transform_classify
-from whale_gunshot_localization.models.tcn_archs import TCNClassifier
-from whale_gunshot_localization.losses.classification_losses import SigBCE
-
-# load config file
-with open("config.yaml", 'r') as yaml_file:
-    config = yaml.load(yaml_file, Loader=yaml.Loader)
+from whale_gunshot_localization.datasets.dataloaders import get_dataloaders_range_classify
+from whale_gunshot_localization.utils.transformations import get_image_transform_range_classify
+from whale_gunshot_localization.models.tcn_archs import TCNRangeAndClassifyCond
+from whale_gunshot_localization.losses.multitask_losses import UncertainSelectiveMSEAndClass
+from whale_gunshot_localization import config
 
 # training arguments
 parser = argparse.ArgumentParser(description="Training on simulated data from adiabatic modes simulator")
@@ -32,7 +29,7 @@ parser.add_argument('--lr', type=float, default=1e-4,
                     help='initial learning rate (default: 1e-4)')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed (default: 1111)')
-parser.add_argument('--channels', type=int, nargs='+', default=5*[250],
+parser.add_argument('--channels', type=int, nargs='+', default=7*[368],
                     help='number of TCN blocks including (fusion default: [250] + 7*[500])')
 parser.add_argument('--kernel_size', type=int, default=6,
                     help='size of 1D kernel (default: 6)')
@@ -66,14 +63,14 @@ if not args.no_wb:
     # get epochs currently trained for if resuming
     if args.wb_id is not None:
         api = wandb.Api()
-        run = api.run("markg98/gunshot-classifier/" + args.wb_id)
+        run = api.run("markg98/simultaneous-range-classify-cond/" + args.wb_id)
         epoch_offset = run.config['epochs']
     else:
         epoch_offset = 0
     
     # intialize
     wandb.init(
-        project="gunshot-classifier",
+        project="simultaneous-range-classify-cond",
         config={
             "epochs" : args.end_epoch - args.start_epoch + 1 + epoch_offset,
             "batch_size" : args.batch_size,
@@ -84,6 +81,7 @@ if not args.no_wb:
             "nfft" : config['stft']['nfft'],
             "max_x" : config['scaling']['max_x'],
             "max_y" : config['scaling']['max_y'],
+            "max_r" : config['scaling']['max_r'],
             "checkpoint_directory" : args.checkpoint_dir,
             "num_channels" : args.channels,
             "dropout" : args.dropout,
@@ -108,15 +106,19 @@ torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 
 # get dataloaders
-dl = get_dataloaders_classify(splits=['train', 'val'],
-                              batch_size=args.batch_size,
-                              drop_last=True,
-                              shuffle=True,
-                              transform=get_image_transform_classify(),
-                              squeeze=True,
-                              num_workers=10,
-                              pin_memory=True)
-n_steps_per_epoch = math.ceil(len(dl['train'].dataset) / args.batch_size)
+dl = get_dataloaders_range_classify(splits=['train', 'val'],
+                                    batch_size=args.batch_size,
+                                    drop_last=False,
+                                    shuffle=True,
+                                    transform=get_image_transform_range_classify(),
+                                    squeeze=True,
+                                    num_workers=20,
+                                    pin_memory=True)
+n_steps_per_epoch = len(dl['train'].batch_sampler)
+n_sensors = len(dl['train'].dataset.sensors)
+
+# get label scaling constants for error calculations
+max_r = dl['train'].dataset.max_r
 
 # print size of input
 print(f"spectrogram size: {dl['train'].dataset.size}\n")
@@ -126,17 +128,13 @@ save_dir = os.path.join(config['models']['checkpoints_directories'], args.checkp
 os.makedirs(save_dir, exist_ok=True)
 
 # initialize TCN model
-model = TCNClassifier(input_size=dl['train'].dataset.size[0], 
-                      num_channels=args.channels,
-                      kernel_size=args.kernel_size,
-                      dropout=args.dropout).to(device)
+model = TCNRangeAndClassifyCond(input_size=dl['train'].dataset.size[0], 
+                                num_channels=args.channels,
+                                kernel_size=args.kernel_size,
+                                dropout=args.dropout,
+                                cond_size=n_sensors).to(device)
 
 # load model/optimizer checkpoint or start from scratch
-# set loss
-criterion = SigBCE()
-# initialize optimizer
-optimizer = torch.optim.Adam([p for p in model.parameters()], lr=args.lr, weight_decay=args.weight_decay)
-
 if args.start_epoch > 1:
     # try to load previous epoch save
     try:
@@ -145,7 +143,18 @@ if args.start_epoch > 1:
         raise ValueError("Desired start epoch does not have a corresponding set of saved model weights.")
     # load states if possible
     model.load_state_dict(checkpoint['model_state_dict'])
+    log_var_list = checkpoint['log_vars']
+    # set loss
+    criterion = UncertainSelectiveMSEAndClass(log_var_list=log_var_list, device=device)
+    # initialize optimizer
+    optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr, weight_decay=args.weight_decay)
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+else:
+    log_var_list = None
+    # set loss
+    criterion = UncertainSelectiveMSEAndClass(log_var_list=log_var_list, device=device)
+    # initialize optimizer
+    optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr, weight_decay=args.weight_decay)
 
 # data parallel
 if args.DP:
@@ -176,7 +185,6 @@ def get_model_state_dict(model):
 def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, save_dir=save_dir, save_all_epochs=args.save_all_epochs, start_epoch=args.start_epoch, verbose=args.verbose):
     """
     Training function.
-
     Parameters
     ----------
     model : nn.Module
@@ -204,7 +212,8 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
     # initialize best model
     best_model_wts = copy.deepcopy(get_model_state_dict(model))
     best_opt_state = copy.deepcopy(optimizer.state_dict())
-    best_acc = float('inf')
+    best_log_vars = copy.deepcopy(criterion.log_vars)
+    best_mse = float('inf')
 
     # train/val loops
     for epoch in range(start_epoch, end_epoch+1):
@@ -219,75 +228,102 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
 
             # keep track of loss, and error
             running_loss = 0.0
+            running_loss_r = 0.0
+            running_loss_c = 0.0
+            running_r_sq_error = 0.0
             running_corrects = 0
             running_example_count = 0
+            running_call_count = 0
 
             # process batches
-            for step, (inputs, targets) in enumerate(tqdm(dataloaders[phase], disable=not verbose)):
-
-                # print(inputs.shape)
+            for step, (inputs, targets_c, targets_r, t_ind) in enumerate(tqdm(dataloaders[phase], disable=not verbose)):
 
                 # put data/labels on device
                 inputs = inputs.to(device)
-                targets = targets.to(device)
+                targets_c = targets_c.to(device)
+                targets_r = targets_r.to(device)
+                t_ind = F.one_hot(t_ind, num_classes=n_sensors).float().to(device)
 
                 # zero out gradient for new batch
                 optimizer.zero_grad()
 
                 with torch.set_grad_enabled(phase == 'train'):
                     # get model outputs and loss
-                    outputs = model(inputs)
-                    loss = criterion(outputs, targets)
+                    outputs = model(inputs, t_ind)
+                    loss, r_loss, c_loss = criterion(outputs, targets_r, targets_c)
                     # backpropogate
                     if phase == 'train':
                         if args.clip > 0:
-                            torch.nn.clip_grad_norm_([p for p in model.parameters()], args.clip)
+                            torch.nn.clip_grad_norm_([p for p in model.parameters()] + [lv for lv in criterion.log_vars], args.clip)
                         loss.backward()
                         optimizer.step()
 
                 # get running loss sum and running sqared error sum (in km) for the X and Y components of location
                 running_loss += loss.item()*inputs.size(0)
+                running_loss_r += r_loss.item()*inputs.size(0)
+                running_loss_c += c_loss.item()*inputs.size(0)
 
                 # get running square error for whole epoch
-                running_example_count += len(targets.detach())
-                running_corrects += ((outputs.detach() >= 0) == targets.detach()).sum()
+                outputs_r_TP = outputs[torch.where((F.softmax(outputs[:,1:],dim=1)[:,1].squeeze() >= 0.5) & (targets_c.squeeze() == 1))[0],0].detach()
+                targets_r_TP = targets_r[torch.where((F.softmax(outputs[:,1:],dim=1)[:,1].squeeze() >= 0.5) & (targets_c.squeeze() == 1))].detach()
+                r_mse = F.mse_loss(outputs_r_TP * max_r / 1000, targets_r_TP.squeeze() * max_r / 1000, reduction='none')
+                running_r_sq_error += r_mse.sum()
+
+                # running class
+                running_example_count += len(targets_c.detach())
+                running_call_count += targets_c.sum().item()
+
+                running_corrects += ((F.softmax(outputs[:,1:].detach(),dim=1)[:,1].squeeze() >= 0.5) == targets_c.detach().squeeze()).sum()
             
                 if (not args.no_wb) and phase == 'train':
-                    step_metrics = {"train/train_loss" : loss,
+                    step_metrics = {"train/train_loss" : loss.item(),
+                                    "train/class_loss" : c_loss.item(),
+                                    "train/range_loss" : r_loss.item(),
                                     "train/epoch" : (step + 1 + (n_steps_per_epoch * epoch)) / n_steps_per_epoch,
-                                    # "train/running_acc" : (running_corrects / running_example_count).item()}
-                    }
+                                    "train/LVr" : criterion.log_vars[0].detach(),
+                                    "train/LVc" : criterion.log_vars[1].detach(),
+                                    "train/r_sq_error" : r_mse.mean(),}
                     if step + 1 < n_steps_per_epoch:
                         wandb.log(step_metrics)
 
             # calculate epoch statistics
             epoch_loss = running_loss / dataloaders[phase].batch_sampler.num_samples
-            epoch_acc = running_corrects / running_example_count
+            epoch_loss_r = running_loss_r / running_call_count
+            epoch_loss_c = running_loss_c / dataloaders[phase].batch_sampler.num_samples
+            epoch_r_mse = running_r_sq_error / running_call_count
 
             # end of epoch wandb logging
             if not args.no_wb:
                 if phase == 'train':
                     train_metrics = {"train/train_avg_loss" : epoch_loss,
-                                     "train/train_acc" : epoch_acc,}
+                                     "train/train_avg_loss_c" : epoch_loss_c,
+                                     "train/train_avg_loss_r" : epoch_loss_r,
+                                     "train/train_r_rmse" : torch.sqrt(epoch_r_mse),
+                                     "train/acc" : running_corrects / running_example_count,}
                     wandb.log({**step_metrics, **train_metrics})
                 else:
                     val_metrics = {"val/val_avg_loss" : epoch_loss,
-                                   "val/val_acc" : epoch_acc,}
+                                   "val/val_avg_loss_c" : epoch_loss_c,
+                                   "val/val_avg_loss_r" : epoch_loss_r,
+                                   "val/val_r_rmse" : torch.sqrt(epoch_r_mse),
+                                   "val/acc" : running_corrects / running_example_count,}
                     wandb.log(val_metrics)
 
             # print epoch information
-            print("{} Loss: {:.4f} -- ACC: {:.4f}".format(phase, epoch_loss, epoch_acc))
+            print("{} Loss: {:.4f} -- RMSE: {:.4f} km -- ACC: {:.4F} -- LVr: {:.4f} -- LVc: {:.4f}".format(phase, epoch_loss, torch.sqrt(epoch_r_mse), running_corrects / running_example_count,criterion.log_vars[0], criterion.log_vars[1]))
 
             # check if we update best model
-            if phase == 'val' and epoch_acc < best_acc:
-                best_acc = epoch_acc
+            if phase == 'val' and epoch_r_mse < best_mse:
+                best_mse = epoch_r_mse
                 best_model_wts = copy.deepcopy(get_model_state_dict(model))
                 best_opt_state = copy.deepcopy(optimizer.state_dict())
+                best_log_vars = copy.deepcopy(criterion.log_vars)
             
             # save model weights if saving all epochs
             if phase == 'train' and save_all_epochs:
                 torch.save({"model_state_dict" : get_model_state_dict(model),
-                            "optimizer_state_dict" : optimizer.state_dict()},
+                            "optimizer_state_dict" : optimizer.state_dict(),
+                            "log_vars" : criterion.log_vars},
                             os.path.join(save_dir, f'weights_{epoch}.pt'))
 
         # new line after train/val cycle
@@ -296,17 +332,20 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
     # training done!
     time_elapsed = time.time() - since
     print("Training completed in {:.0f}h {:.0f}m {:.0f}s".format(time_elapsed // 3600, (time_elapsed // 60) % 60, time_elapsed % 60))
-    print("Best ACC: {:.4f}".format(best_acc))
+    print("Best avg MSE: {:.4f} km^2".format(best_mse))
+    print("Best avg RMSE: {:.4f} km".format(torch.sqrt(best_mse)))
 
     # save best model weights
     torch.save({"model_state_dict" : best_model_wts,
-                "optimizer_state_dict" : best_opt_state},
+                "optimizer_state_dict" : best_opt_state,
+                "log_vars" : best_log_vars},
                 os.path.join(save_dir, f'weights_best.pt'))
 
     # if we're not saving every epoch, save the last one
     if not save_all_epochs:
         torch.save({"model_state_dict" : get_model_state_dict(model),
-                    "optimizer_state_dict" : optimizer.state_dict()},
+                    "optimizer_state_dict" : optimizer.state_dict(),
+                    "log_vars" : criterion.log_vars},
                     os.path.join(save_dir, f'weights_{epoch}.pt'))
 
 if __name__ == "__main__":

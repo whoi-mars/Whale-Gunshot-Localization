@@ -1,0 +1,44 @@
+dataset:
+  data_directory: "/media/mark/extradrive2/TOSSIT_sims"
+  entry_keys: [T, data, fs, labels, t_dec_max, t_dec_min, class_labels, range_labels]
+  exp_data_directory: ""
+  ccb_data_directory: "/media/mark/extradrive3/CCB_2023/acoustics"
+  ccb_visual_sightings: ""
+  ccb_visual_flightpath: ""
+  exp_data_file: ""
+  sandbox_data_file: ""
+  noise_data: "ccb_noise_2023.h5"
+TOSSIT:
+  TOSSIT_y: [0, 2.594540e+03, 3.335837e+03, -2.501878e+03, -3.243175e+03, -3.521161e+03, -4.447783e+03, 1.853243e+02, 0, 9.266214e+01, 2.779864e+02, -5.467066e+03, -6.856999e+03, -1.204608e+03, 1.389932e+03, -1.760581e+03, 2.131229e+03]
+  TOSSIT_x: [0, 5.077966e+03, 6.348087e+03, -4.792586e+03, -6.131082e+03, 4.369114e+03, 5.425484e+03, 5.710871e+03, 7.191288e+03, -5.428785e+03, -6.980040e+03, -7.045120e+01, -7.043807e+01, -2.396709e+03, 2.679606e+03, 2.114586e+03, -2.538826e+03]
+  ids: ["5483", "6464", "6466", "6474", "5816", "5814", "6469", "5815", "6468", "6470", "6476", "6465", "5783", "6473", "6477", "6472", "5818"];
+signal:
+  fs: 600 # [Hz]
+  T: 6 # [s]
+stft:
+  window: "hann"
+  nperseg: 62
+  noverlap: 56 # 53
+  nfft: 463
+scaling:
+  # small and reduced tossit
+  # max_x: 13383.049267
+  # min_x: -4690.965723
+  # max_y: 2779.864302
+  # min_y: -16123.212949
+  # max_r: 21777.249126
+  # 1.5 km around network
+  # max_x: 11794.090834
+  # min_x: -1517.368411
+  # max_y: 1389.932151
+  # min_y: -11397.443636
+  # max_r: 16394.476413
+  # 4 sensors
+  max_x: 14016.143880
+  min_x: -2485.621575
+  max_y: 8988.227908
+  min_y: -6579.012180
+  max_r: 19794.982956
+models:
+  checkpoints_directories: "/media/mark/extradrive2/models"
+  model_dir: "range_classify_small_4"

@@ -84,7 +84,7 @@ if __name__ == "__main__":
 
     # grab spectrograms
     df = pd.read_csv(os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "multi_scan_results.csv"))
-    results = get_spects_by_id(df, np.arange(1, df['id'].max()))
+    results = get_spects_by_id(df, np.arange(1, df['id'].max()+1))
     
     # make and save figures
     for ID, l in enumerate(tqdm(results, disable=len(results) == 1, desc="saving figures"), start=1):

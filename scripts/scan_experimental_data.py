@@ -43,9 +43,16 @@ parser.add_argument('-o', '--overlap_fraction', type=float, default=0.75, metava
                     help='how much window to overlap when scanning the file (default: 0.75)')
 parser.add_argument('--scan', action='store_true',
                     help='whether to scan or just plot')
-parser.add_argument('-b', '--background', action='store_true',
+parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
+parser.add_argument('--suppress_warnings', action='store_true',
+                    help="tell Python to suppress warnings")
 args = parser.parse_args()
+
+# suppress warnings
+if args.suppress_warnings:
+    import warnings
+    warnings.filterwarnings("ignore")
 
 if args.scan:
     device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
@@ -53,67 +60,6 @@ if args.scan:
         print("Using the GPU!", flush=True)
     else:
         print("WARNING: Could not find GPU. Using CPU only.", flush=True)
-
-def plot_localization(locs_est, buffer=6000, title=None, dates=None, save=None, legend_transparency=0): 
-    """
-    Plot estimated source locations.
-
-    Parameters
-    ----------
-    locs_est : List[np.array], with each subarray of shape N X 2
-        list of lists of estimated locations where the first column stores the Y
-        coordinate and the second stores the X coordinates
-    buffer : float
-        how much to plot outside of the limits established in the config file
-    title : str
-        plot title
-    dates : List[datetime.datetime]
-        list of dates associated with each sublist of location estiamtes
-        in locs_est
-    save : str
-        path at which to save the plot if desired
-    """
-
-    # format inputs
-    if not isinstance(locs_est, list):
-        locs_est = [locs_est]
-    if not isinstance(dates, list):
-        dates = [dates]
-    assert len(locs_est) == len(dates), "locs_est and dates lists must have a one-to-one correspondence"
-
-    # random list of color for plotting
-    rng = np.random.default_rng(1111)
-    colors = [rng.uniform(0, 255, size=3) for _ in range(len(locs_est))]
-
-    # load constants
-    TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-    min_x = config['scaling']['min_x']
-    max_x = config['scaling']['max_x']
-    min_y = config['scaling']['min_y']
-    max_y = config['scaling']['max_y']
-
-    # define projection object
-    pargs = proj.Proj(proj="aeqd", lat_0=41.9108, lon_0=-70.4292, datum="WGS84", units="m")
-    
-    # get lon/lat bounds for the map
-    lon, lat = pargs([min_x-buffer, max_x+buffer], [min_y-buffer, max_y+buffer], inverse=True)
-    region = [*lon, *lat]
-
-    # convert sensor locs to lat/lon
-    lon_TOSSIT, lat_TOSSIT = pargs(TOSSIT_locations[:,1], -TOSSIT_locations[:,0], inverse=True)
-
-    fig = pygmt.Figure()
-    fig.basemap(region=region, projection="M15c", frame=True)
-    fig.coast(land="black", water="skyblue4")
-    fig.plot(x=lon_TOSSIT, y=lat_TOSSIT, style="t0.3c", fill="green", pen="black", label="sensors")
-    for i, l in enumerate(locs_est):
-        lon_est, lat_est = pargs(l[:,1], -l[:,0], inverse=True)
-        fig.plot(x=lon_est, y=lat_est, style="x0.3c", pen=f"1p,{colors[i][0]}/{colors[i][1]}/{colors[i][2]}", label=f'estimate ({dates[i]})' if dates[0] else 'estimate')
-    
-    fig.legend(transparency=legend_transparency)
-
-    if save is not None:
-        fig.savefig(save)
 
 def has_len(x):
     """
@@ -184,7 +130,7 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
     CA = experimental.ClipAnalyzer(model, data_params, preprocessor=experimental.l2_standardize, device=device)
 
     # prepare localizer object
-    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=0.5), consistency_thresh=2000, prune=False)
+    l = experimental.Localizer(k=4, multilat=experimental.MultilaterationOpt(method_thresh=float('inf')), consistency_thresh=500, prune=False)
 
     # get starts of chunks to read and total days
     chunk_starts = pd.date_range(start=start, end=end, freq=f"{chunk_size}s")
@@ -230,8 +176,8 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
 
                     if success:
                         # assocaite/localize
-                        assocs, locs_est = l.associate_and_localize(method='partition', reduce_dups=False, last_step=True)
-                        
+                        assocs, locs_est = l.associate_and_localize(reduce_dups=False, last_step=True)
+
                         # flatten outputs
                         ranges_flat, timestamps_flat = [], []
                         sensor_map = {}
@@ -248,17 +194,21 @@ def scan_experimental_data(model, start, end, chunk_size, overlap_fraction, orde
                         # create dictionary to save results
                         row_dict = {col : [] for col in columns}
                         for i, assoc in enumerate(assocs):
-                            for m in assoc:
-                                row_dict["id"].append(id)
-                                row_dict["sensor"].append(ordered_sensors[sensor_map[m]])
-                                row_dict["file_name"].append(file_list[sensor_map[m]])
-                                row_dict["timestamp"].append(((start_time.to_numpy() + np.timedelta64(int(timestamps_flat[m] * 1000), "ms")) - start_time_dict[row_dict["file_name"][-1]]).astype('timedelta64[s]').astype(float))
-                                row_dict["global_timestamp"].append(experimental.get_wav_timestamp(row_dict["file_name"][-1], int((row_dict["timestamp"][-1]) * 1000)))
-                                row_dict["range"].append(np.around(ranges_flat[m], 2))
-                                row_dict["x"].append(np.around(locs_est[i,1], 2))
-                                row_dict["y"].append(np.around(locs_est[i,0], 2))
-                            id += 1
-                        
+                            if locs_est[i,0] >= config['scaling']['min_y'] \
+                               and locs_est[i,0] <= config['scaling']['max_y'] \
+                               and locs_est[i,1] >= config['scaling']['min_x'] \
+                               and locs_est[i,1] <= config['scaling']['max_x']:
+                                for m in assoc:
+                                    row_dict["id"].append(id)
+                                    row_dict["sensor"].append(ordered_sensors[sensor_map[m]])
+                                    row_dict["file_name"].append(file_list[sensor_map[m]])
+                                    row_dict["timestamp"].append(((start_time.to_numpy() + np.timedelta64(int(timestamps_flat[m] * 1000), "ms")) - start_time_dict[row_dict["file_name"][-1]]).astype('timedelta64[s]').astype(float))
+                                    row_dict["global_timestamp"].append(experimental.get_wav_timestamp(row_dict["file_name"][-1], int((row_dict["timestamp"][-1]) * 1000)))
+                                    row_dict["range"].append(np.around(ranges_flat[m], 2))
+                                    row_dict["x"].append(np.around(locs_est[i,1], 2))
+                                    row_dict["y"].append(np.around(locs_est[i,0], 2))
+                                id += 1
+
                         new_row = pd.DataFrame(row_dict)
                         new_row.to_csv(csv_path, mode='a', index=False, header=False)
                     # update pointer and proress bar
@@ -274,7 +224,7 @@ if __name__ == '__main__':
     # get files associated with first sensor in ordered_sensors list
     wav_files = []
     for s in args.ordered_sensors:
-        wav_files.extend(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], args.ordered_sensors[0], "*.wav")))
+        wav_files.extend(glob.glob(os.path.join(config['dataset']['ccb_data_directory'], s, "*.wav")))
     wav_files = np.asarray(wav_files)
 
     # sort wav files in chonological order by start time
@@ -294,7 +244,7 @@ if __name__ == '__main__':
         model = TCNRangeAndClassify(input_size=232, 
                                     num_channels=7*[368],
                                     kernel_size=6,
-                                    dropout=0.05).to(device)
+                                    dropout=0.3).to(device)
 
         # load model weights
         state_dict = torch.load(os.path.join(config['models']['checkpoints_directories'], config['models']['model_dir'], 'weights_best.pt'),
@@ -303,47 +253,3 @@ if __name__ == '__main__':
 
         # perform scanning
         scan_experimental_data(model, args.start, args.end, 2 * args.half_window, args.overlap_fraction, args.ordered_sensors, args.background)
-
-    ###################################
-    #           plot results          #
-    ###################################
-
-    fig_dir = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "detection_maps")
-    Path(fig_dir).mkdir(exist_ok=True, parents=True)
-    
-    csv_path = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", config['models']['model_dir'], "multi_scan_results.csv")
-    if not os.path.exists(csv_path):
-        raise IOError("no results file")
-    df = pd.read_csv(csv_path)
-
-    # get bin edges
-    bins_dt = pd.date_range(start=pd.to_datetime(start_time_dict[wav_files[0]]).date(), end=(pd.to_datetime(end_time_dict[wav_files[-1]]) + pd.Timedelta(1, "d")).date(), freq="D")
-    df["bin"] = pd.to_datetime(pd.cut(pd.DatetimeIndex(df["global_timestamp"]), bins=bins_dt, labels=bins_dt[:-1]))
-    bin_grouped = df.groupby(by="bin")
-
-    # # load map
-    # Image.MAX_IMAGE_PIXELS = 729744000
-    # bathym = Image.open(os.path.join(config['dataset']['data_directory'], "mikesbathym.tif"))
-
-    # make plots
-    all_locs_est = []
-    all_dates = []
-    for _, dfg_bin in bin_grouped:
-        id_grouped = dfg_bin.groupby(by="id")
-        x, y = [],[]
-        date = None 
-        for _, dfg in id_grouped:
-            dfg = dfg.reset_index()
-            x.append(dfg.loc[0,"x"])
-            y.append(dfg.loc[0,"y"])
-            if date is None:
-                date = dfg.loc[0,"bin"]
-
-        # plot locations by day
-        locs_est = np.stack([y, x], axis=1)
-        plot_localization(locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_{date.date()}.png"), dates=date.date())
-        all_dates.append(date.date())
-        all_locs_est.append(locs_est)
-        
-    # plot all days
-    plot_localization(all_locs_est, title="CCB-2023 Location Estimates", save=os.path.join(fig_dir, f"locations_all_dates.png"), dates=all_dates, legend_transparency=70)

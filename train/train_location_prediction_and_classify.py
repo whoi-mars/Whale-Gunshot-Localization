@@ -234,7 +234,7 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
             running_call_count = 0
 
             # process batches
-            for step, (inputs, targets_c, targets_r) in enumerate(tqdm(dataloaders[phase], disable=not verbose)):
+            for step, (inputs, targets_c, targets_r, _) in enumerate(tqdm(dataloaders[phase], disable=not verbose)):
 
                 # put data/labels on device
                 inputs = inputs.to(device)
