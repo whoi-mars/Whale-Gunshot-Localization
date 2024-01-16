@@ -1,50 +1,56 @@
-from scipy.io import wavfile
-from scipy.signal import decimate, stft
+from scipy.signal import stft, resample_poly
 import matplotlib.pyplot as plt
 from  matplotlib.widgets import Button
 import random
 import numpy as np
 import argparse
 import csv
+from pathlib import Path
+import librosa
+import hdf5storage
+import h5py
+from tqdm import tqdm
 import os
 
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 
-def get_undecimated_indices(start_idx_dec, fs_dec, fs, T):
+# Arguments
+parser = argparse.ArgumentParser()
+parser.add_argument("-f", "--file", type=str, help="Name of CSV log_file")
+parser.add_argument("--T", type=str, default=10, help="Time window to save")
+parser.add_argument("-s", "--save", action='store_true', help="Save collected data")
+parser.add_argument('-fsmat', '--sample_rate_matlab', type=int, default=12000,
+                    help='desired sample rate for MATLAB data simulation at which to save the collected examples (default: 12000 Hz)')
+parser.add_argument('-fspy', '--sample_rate_python', type=int, default=600,
+                    help='desired sample rate for NN training at which to save the collected examples (default: 600 Hz)')
+args = parser.parse_args()
 
+def read_audio_section(wav_path, start_time, end_time, sr):
     """
-    Translates the start and end indices of a decimated signal back to what they
-    would be in the original undecimated file.
+    Read a section of a WAV file.
 
     Parameters
     ----------
-    start_idx_dec: int, start index of the decimated sitnal
-    fs_dec: float, sampling frequency of the decimated signal
-    fs: int, sampling frequency of the undecimated signal
-    T: Duration of the signal
-
+    wav_path : str
+        path to WAV file
+    start_time : float
+        start time of section to read
+    end_time : float
+        end time of section to read
+    sr : float
+        sample frequency
+    
     Returns
     -------
-    start_idx: int, start index of undecimated signal
-    end_idx: int, end index of undecimated signal
+    array-like
+        section of audio from WAV file
     """
+    
+    wav, _ = librosa.load(wav_path, offset=start_time, duration=(end_time - start_time), sr=sr)
 
-    # Get time in call of start index
-    t = start_idx_dec / fs_dec
+    return wav
 
-    # Get index of start time in undecimated signal
-    start_idx = t*fs
-
-    # Number of samples for desired time window
-    n_samples = np.ceil(T*fs)
-
-    # Make sure indxs are ints
-    start_idx = int(start_idx)
-    end_idx = int(start_idx + n_samples)
-
-    return start_idx, end_idx
-
-def wav_rejection_sample(wav_paths, csv_path, T, fmax):
+def wav_rejection_sample(wav_paths, csv_path, T):
 
     """
     Plots a grid of randomly selected signals from provided wav file directories
@@ -53,15 +59,14 @@ def wav_rejection_sample(wav_paths, csv_path, T, fmax):
     start index in the undecimated file, and end index in the undecimated file to a CSV.
     Pushing the 'Exit' button will terminate the program and nothing further will be saved.
 
-    Example
-    -------
-    python -m range_finder.scripts.wav_rejection_sample --save noise_collect
-
     Inputs
     ------
-    wav_paths: array[str], path (paths) to a directory (directories) containing the wav files to sample from
-    csv_path: str, path of the CSV file to save results to
-    fmax: float, The maximum frequency to show in the displayed spectrograms 
+    wav_paths: array[str] 
+        path (paths) to a directory (directories) containing the wav files to sample from
+    csv_path: str
+        path of the CSV file to save results to
+    T: float
+        signal duration to save
     """
 
     # Size of one side of plot grid
@@ -76,46 +81,44 @@ def wav_rejection_sample(wav_paths, csv_path, T, fmax):
 
     while True:
         
-        # Choose path to wav file directory randomly
-        wav_path = random.choice(wav_paths)
-
-        # Collect wave files from 
-        wav_files = [f for f in os.listdir(wav_path) if os.path.isfile(os.path.join(wav_path, f)) and ".wav" in f]
-
         # Choose random wav file and load
-        wav_file = random.choice(wav_files)
-        print(os.path.join(wav_path, wav_file))
-        fs, s = wavfile.read(os.path.join(wav_path, wav_file))
-
-        # Decimate signal appropriatly
-        dec_factor = round(fs / (2*fmax))
-        s_dec = decimate(s, dec_factor)
-        fs_dec = fs / dec_factor
-
-        # Number of samples per specified time window
-        n_samples = round(T*fs_dec)
+        selected_files = []
+        selected_srs = []
+        selected_durations = []
+        for _ in range(square ** 2):
+            wav_path = random.choice(wav_paths)
+            wav_files = [f for f in os.listdir(wav_path) if os.path.isfile(os.path.join(wav_path, f)) and ".wav" in f]
+            selected_files.append(os.path.join(wav_path, random.choice(wav_files)))
+            selected_srs.append(librosa.get_samplerate(selected_files[-1]))
+            selected_durations.append(np.floor(librosa.get_duration(filename=selected_files[-1], sr=selected_srs[-1])))
 
         # Make numpy array to store files names and indices
-        rows = np.zeros((square ** 2, 3), dtype=object)
+        rows = np.zeros((square ** 2, 4), dtype=object)
 
         # Save axes
         ax_list = list()
 
         # Choose a random file and plot a grid of samples
         ix = 1
+        counter = 0
         fig = plt.figure('Rejection Sampler', figsize=(32,32))
         plt.clf()
         for _ in range(square):
             for _ in range(square):
                 
                 # Choose random sample from chosen file and store indices
-                dec_start_idx = random.randint(0, len(s_dec) - n_samples)
-                start_idx, end_idx = get_undecimated_indices(dec_start_idx, fs_dec, fs, T)
-                rows[ix-1,:] = [os.path.join(wav_path, wav_file), start_idx, end_idx]
+                start_t = random.randint(0, selected_srs[counter] - T)
+                end_t = start_t + T
+                rows[ix-1,:] = [selected_files[counter], start_t, end_t, selected_srs[counter]]
 
                 # Calcualte spectrogram
-                s_curr = s_dec[dec_start_idx:dec_start_idx+n_samples]
-                [f,t,Zxx] = stft(x=s_curr, fs=fs_dec, nperseg=31, noverlap=20, nfft=500)
+                s_curr = read_audio_section(selected_files[counter], start_t, end_t, selected_srs[counter])
+                s_curr = s_curr - s_curr.mean()
+                if config['signal']['fs'] != selected_srs[counter]:
+                    s_curr = resample_poly(s_curr, config['signal']['fs'], selected_srs[counter])
+                    s_curr = s_curr - s_curr.mean()
+
+                [f,t,Zxx] = stft(x=s_curr, fs=config['signal']['fs'], nperseg=config['stft']['nperseg'], noverlap=config['stft']['noverlap'], nfft=config['stft']['nfft'])
                 log_spec = np.flipud(10*np.log10(np.abs(Zxx)**2))
                 print(log_spec.shape)
 
@@ -125,6 +128,7 @@ def wav_rejection_sample(wav_paths, csv_path, T, fmax):
                 ax.imshow(log_spec)
                 ax_list.append(ax)
                 ix += 1
+                counter += 1
 
         # Set up selection of figures to not save        
         fig.canvas.mpl_connect("button_press_event", lambda event: on_plot_click(event, ax_list, wanted_ax_set))
@@ -147,7 +151,7 @@ def wav_rejection_sample(wav_paths, csv_path, T, fmax):
         if not os.path.exists(csv_path):
             with open(csv_path, 'w', encoding='UTF8', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(["file", "start_ind", "end_ind"])
+                writer.writerow(["file", "start_t", "end_t", "fs"])
                 writer.writerows(rows)
         else:
             with open(csv_path, 'a', encoding='UTF8', newline='') as f:
@@ -157,35 +161,73 @@ def wav_rejection_sample(wav_paths, csv_path, T, fmax):
         # Clear unwanted axes
         wanted_ax_set = set(range(square ** 2))
 
+def save_data(csv_path, T):
+    """
+    Save selected data from CSV
+
+    Inputs
+    ------
+    csv_path : str
+        path to CSV with audio segments to save
+    T : float
+        duration of data to be saved
+    """
+    with open(csv_path, newline='') as f:
+        reader = csv.DictReader(f)
+        reader = list(reader)
+        n = len(reader)
+
+        # to store noise signals
+        X_mat = np.zeros((n, T*args.sample_rate_matlab))
+        X_py = np.zeros((n, T*args.sample_rate_python))
+
+        for i, row in enumerate(tqdm(reader)):
+            wav = read_audio_section(row['file'], int(row['start_t']), int(row['end_t']), int(row['fs']))
+            wav = wav - wav.mean()
+            wav_mat = resample_poly(wav, args.sample_rate_matlab, int(row['fs'])) if args.sample_rate_matlab != row['fs'] else wav
+            wav_py = resample_poly(wav, args.sample_rate_python, int(row['fs'])) if args.sample_rate_python != row['fs'] else wav
+            X_mat[i,:] = wav_mat
+            X_py[i,:] = wav_py
+
+    # save as MAT file
+    mdict = {u'noise_from_data': X_mat.T, u'fs': float(args.sample_rate_matlab)}
+    hdf5storage.savemat(os.path.join(config['dataset']['data_directory'], f"{args.file}.mat"), mdict, format="7.3")
+
+    # mean-center and L2 norm for h5 noise
+    X_py = X_py - X_py.mean(axis=1, keepdims=True)
+    X_py = X_py / np.sqrt(np.sum(X_py ** 2, axis=1, keepdims=True))
+
+    with h5py.File(os.path.join(config['dataset']['data_directory'], f"{args.file}.h5"), "w") as f:
+        f.create_dataset('data', data=X_py, shape=X_py.shape, chunks=(1, X_py.shape[1]))
+        f.create_dataset('fs', data=args.sample_rate_matlab, shape=(1,)) 
+                
 if __name__ == "__main__":
 
-    all_dirs = list()
-    max_depth = 0
-    for path, subdirs, _ in os.walk(config['ccb_data_directory']):
-        for dir in subdirs:
-            
-            curr_path = os.path.join(path, dir)
-            len_path = len(curr_path.split('/'))
+    # file information
+    noise_dir = os.path.join(PROJECT_ROOT_DIR, "scripts", "results", "noise")
+    Path(noise_dir).mkdir(exist_ok=True, parents=True)
+    csv_name = 'results' if args.file is None else args.file
 
-            if len_path > max_depth:
-                max_depth = len_path
+    if args.save:
+        save_data(os.path.join(noise_dir, '{}.csv'.format(csv_name)), args.T)
+    else:
+        all_dirs = list()
+        max_depth = 0
+        for path, subdirs, _ in os.walk('/media/markgoldwater/Extreme SSD/CCB_2023'):
+            for dir in subdirs:
+                
+                curr_path = os.path.join(path, dir)
+                len_path = len(curr_path.split('/'))
 
-            all_dirs.append((curr_path, len_path))
+                if len_path > max_depth:
+                    max_depth = len_path
 
-    
-    wav_paths = [pair[0] for pair in all_dirs if pair[1] == max_depth]
+                all_dirs.append((curr_path, len_path))
 
-    # Arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-s", "--save", type=str, help="Name of CSV log_file")
+        wav_paths = [pair[0] for pair in all_dirs if pair[1] == max_depth]
 
-    # Decode arguments
-    args = parser.parse_args()
-    csv_name = 'results' if args.save is None else args.save
-
-    wav_rejection_sample(
-        wav_paths, 
-        os.path.join('/tf/workspace/range_finder/data/csv_files/', '{}.csv'.format(csv_name)), 
-        config['signal']['T'], 
-        config['signal']['fs']
-    )
+        wav_rejection_sample(
+            wav_paths, 
+            os.path.join(noise_dir, '{}.csv'.format(csv_name)), 
+            args.T,
+        )
