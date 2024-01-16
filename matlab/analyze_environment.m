@@ -26,9 +26,12 @@ rskD = RSKderivesalinity(rskD);
 rskD = RSKderivedepth(rskD);
 rskD = RSKderivesoundspeed(rskD);
 
-figure;
-[handleD, axesD] = RSKplotprofiles(rskD,'channel',{'Speed Of Sound','Temperature','Salinity'},'direction','down');
+f1 = figure;
+[handleD, axesD] = RSKplotprofiles(rskD,'channel',{'Speed Of Sound','Temperature','Salinity'},'direction','both');
 xlabel(axesD(2),'^{\circ}C')
+fontsize(f1,0.3,"inches");
+sgt1 = sgtitle("Deployment");
+% sgt1.FontSize = 20;
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %                Recovery                %
@@ -54,6 +57,9 @@ rskR = RSKderivesalinity(rskR);
 rskR = RSKderivedepth(rskR);
 rskR = RSKderivesoundspeed(rskR);
 
-figure;
-[handleR, axesR] = RSKplotprofiles(rskR,'channel',{'Speed Of Sound','Temperature','Salinity'},'direction','down');
+f2 = figure;
+[handleR, axesR] = RSKplotprofiles(rskR,'channel',{'Speed Of Sound','Temperature','Salinity'},'direction','both');
 xlabel(axesR(2),'^{\circ}C')
+fontsize(f2,0.3,"inches");
+sgt2 = sgtitle("Recovery");
+% sgt2.FontSize = 20;
