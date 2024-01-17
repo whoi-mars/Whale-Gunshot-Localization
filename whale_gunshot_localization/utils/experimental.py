@@ -820,8 +820,8 @@ def sort_wav_chronological(wav_files):
         with open(xml_file, 'r') as f:
             data = f.read()
         data = BeautifulSoup(data, features='lxml')
-        start_time = np.datetime64(data.find_all("wavfilehandler", samplingstarttimelocal=True)[0]['samplingstarttimelocal'])
-        end_time = np.datetime64(data.find_all("wavfilehandler", samplingstoptimelocal=True)[0]['samplingstoptimelocal'])
+        start_time = np.datetime64(data.find_all("wavfilehandler", samplingstarttimeutc=True)[0]['samplingstarttimeutc'])
+        end_time = np.datetime64(data.find_all("wavfilehandler", samplingstoptimeutc=True)[0]['samplingstoptimeutc'])
         start_times.append(start_time)
         end_times.append(end_time)
 
