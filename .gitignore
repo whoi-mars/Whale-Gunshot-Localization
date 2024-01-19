@@ -17,6 +17,7 @@ wandb/
 *.out
 *.csv
 !scripts/results/*.csv
+!scripts/results/noise/*.csv
 !matlab/*.csv
 !experiments/results/*/*.csv
 train_logs/
