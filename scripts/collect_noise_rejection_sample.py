@@ -107,7 +107,7 @@ def wav_rejection_sample(wav_paths, csv_path, T):
             for _ in range(square):
                 
                 # Choose random sample from chosen file and store indices
-                start_t = random.randint(0, selected_srs[counter] - T)
+                start_t = random.randint(0, selected_durations[counter] - T)
                 end_t = start_t + T
                 rows[ix-1,:] = [selected_files[counter], start_t, end_t, selected_srs[counter]]
 
@@ -120,7 +120,6 @@ def wav_rejection_sample(wav_paths, csv_path, T):
 
                 [f,t,Zxx] = stft(x=s_curr, fs=config['signal']['fs'], nperseg=config['stft']['nperseg'], noverlap=config['stft']['noverlap'], nfft=config['stft']['nfft'])
                 log_spec = np.flipud(10*np.log10(np.abs(Zxx)**2))
-                print(log_spec.shape)
 
                 ax = fig.add_subplot(square, square, ix)
                 ax.set_xticks([])
@@ -213,7 +212,7 @@ if __name__ == "__main__":
     else:
         all_dirs = list()
         max_depth = 0
-        for path, subdirs, _ in os.walk('/media/markgoldwater/Extreme SSD/CCB_2023'):
+        for path, subdirs, _ in os.walk('/media/markgoldwater/Extreme SSD/SBCEX22/acoustics/2_circle_tow_riuss'):
             for dir in subdirs:
                 
                 curr_path = os.path.join(path, dir)
