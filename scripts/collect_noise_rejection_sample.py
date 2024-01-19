@@ -178,17 +178,20 @@ def save_data(csv_path, T):
 
         # to store noise signals
         X = np.zeros((n, T*args.sample_rate_python))
+        X_mat = np.zeros((n,T*args.sample_rate_matlab))
 
         for i, row in enumerate(tqdm(reader)):
             file = row['file'].split('/')
             file = os.path.join(config['dataset']['ccb_data_directory'], '/'.join(file[7:]))
             wav = read_audio_section(file, int(row['start_t']), int(row['end_t']), int(row['fs']))
             wav = wav - wav.mean()
-            wav = resample_poly(wav, args.sample_rate_python, int(row['fs'])) if args.sample_rate_python != row['fs'] else wav
-            X[i,:] = wav
+            wav_py = resample_poly(wav, args.sample_rate_python, int(row['fs'])) if args.sample_rate_python != row['fs'] else wav
+            wav_mat = resample_poly(wav, args.sample_rate_matlab, int(row['fs'])) if args.sample_rate_matlab != row['fs'] else wav
+            X[i,:] = wav_py
+            X_mat[i,:] = wav_mat
 
     with h5py.File(os.path.join(config['dataset']['data_directory'], f"{args.file}_mat.h5"), "w") as f:
-        f.create_dataset('data', data=X, shape=X.shape, chunks=(1, X.shape[1]))
+        f.create_dataset('data', data=X_mat, shape=X_mat.shape, chunks=(1, X_mat.shape[1]))
         f.create_dataset('fs', data=args.sample_rate_matlab, shape=(1,)) 
 
     # mean-center and L2 norm for h5 noise
