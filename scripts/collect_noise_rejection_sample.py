@@ -177,28 +177,27 @@ def save_data(csv_path, T):
         n = len(reader)
 
         # to store noise signals
-        X_mat = np.zeros((n, T*args.sample_rate_matlab))
-        X_py = np.zeros((n, T*args.sample_rate_python))
+        X = np.zeros((n, T*args.sample_rate_python))
 
         for i, row in enumerate(tqdm(reader)):
-            wav = read_audio_section(row['file'], int(row['start_t']), int(row['end_t']), int(row['fs']))
+            file = row['file'].split('/')
+            file = os.path.join(config['dataset']['ccb_data_directory'], '/'.join(file[7:]))
+            wav = read_audio_section(file, int(row['start_t']), int(row['end_t']), int(row['fs']))
             wav = wav - wav.mean()
-            wav_mat = resample_poly(wav, args.sample_rate_matlab, int(row['fs'])) if args.sample_rate_matlab != row['fs'] else wav
-            wav_py = resample_poly(wav, args.sample_rate_python, int(row['fs'])) if args.sample_rate_python != row['fs'] else wav
-            X_mat[i,:] = wav_mat
-            X_py[i,:] = wav_py
+            wav = resample_poly(wav, args.sample_rate_python, int(row['fs'])) if args.sample_rate_python != row['fs'] else wav
+            X[i,:] = wav
 
-    # save as MAT file
-    mdict = {u'noise_from_data': X_mat.T, u'fs': float(args.sample_rate_matlab)}
-    hdf5storage.savemat(os.path.join(config['dataset']['data_directory'], f"{args.file}.mat"), mdict, format="7.3")
+    with h5py.File(os.path.join(config['dataset']['data_directory'], f"{args.file}_mat.h5"), "w") as f:
+        f.create_dataset('data', data=X, shape=X.shape, chunks=(1, X.shape[1]))
+        f.create_dataset('fs', data=args.sample_rate_matlab, shape=(1,)) 
 
     # mean-center and L2 norm for h5 noise
-    X_py = X_py - X_py.mean(axis=1, keepdims=True)
-    X_py = X_py / np.sqrt(np.sum(X_py ** 2, axis=1, keepdims=True))
+    X = X - X.mean(axis=1, keepdims=True)
+    X = X / np.sqrt(np.sum(X ** 2, axis=1, keepdims=True))
 
     with h5py.File(os.path.join(config['dataset']['data_directory'], f"{args.file}.h5"), "w") as f:
-        f.create_dataset('data', data=X_py, shape=X_py.shape, chunks=(1, X_py.shape[1]))
-        f.create_dataset('fs', data=args.sample_rate_matlab, shape=(1,)) 
+        f.create_dataset('data', data=X, shape=X.shape, chunks=(1, X.shape[1]))
+        f.create_dataset('fs', data=args.sample_rate_python, shape=(1,)) 
                 
 if __name__ == "__main__":
 
