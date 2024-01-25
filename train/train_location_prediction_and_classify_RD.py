@@ -30,7 +30,7 @@ parser.add_argument('--lr', type=float, default=1e-4,
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed (default: 1111)')
 parser.add_argument('--channels', type=int, nargs='+', default=7*[368],
-                    help='number of TCN blocks including (fusion default: [250] + 7*[500])')
+                    help='number of TCN blocks including (fusion default: 7*[368])')
 parser.add_argument('--kernel_size', type=int, default=6,
                     help='size of 1D kernel (default: 6)')
 parser.add_argument('--dropout', type=float, default=0.2,
@@ -106,14 +106,14 @@ torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 
 # get dataloaders
-dl = get_dataloaders_range_classify(splits=['train', 'val'],
-                                    batch_size=args.batch_size,
-                                    drop_last=False,
-                                    shuffle=True,
-                                    transform=get_image_transform_range_classify(),
-                                    squeeze=True,
-                                    num_workers=20,
-                                    pin_memory=True)
+dl = get_dataloaders_range_classify_RD(splits=['train', 'val'],
+                                       batch_size=args.batch_size,
+                                       drop_last=False,
+                                       shuffle=True,
+                                       transform=get_image_transform_range_classify(),
+                                       squeeze=True,
+                                       num_workers=20,
+                                       pin_memory=True)
 n_steps_per_epoch = len(dl['train'].batch_sampler)
 
 # get label scaling constants for error calculations
