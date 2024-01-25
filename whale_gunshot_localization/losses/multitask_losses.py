@@ -86,12 +86,13 @@ class UncertainSelectiveMSEAndClass(nn.Module):
     def forward(self, outputs, r_labels, c_labels):
 
         # Isolate ranges, range labels, and range stds for call-containing example only
-        call_outs = outputs[c_labels.squeeze() == 1, [0]]
+        call_outs = outputs[c_labels.squeeze() == 1, 0]
         call_r_labels = r_labels[c_labels.squeeze() == 1]
-        r_std = torch.exp(self.log_vars[0])
+
+        r_std = torch.sqrt(torch.exp(self.log_vars[0])) # invert log transform to get sigma_r
 
         # get class stds
-        c_std = torch.exp(self.log_vars[1])
+        c_std = torch.sqrt(torch.exp(self.log_vars[1])) # invert log transform to get sigma_c
 
         # instantiate distribution for r
         cond_dist_r = Normal(loc=call_outs, scale=r_std)
