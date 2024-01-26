@@ -145,9 +145,8 @@ if args.start_epoch > 1:
     optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr, weight_decay=args.weight_decay)
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 else:
-    log_var_list = None
     # set loss
-    criterion = UncertainSelectiveMSEAndClass(log_var_list=log_var_list, device=device)
+    criterion = UncertainSelectiveMSEAndClass(device=device)
     # initialize optimizer
     optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr, weight_decay=args.weight_decay)
 
@@ -281,9 +280,11 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
 
             # calculate epoch statistics
             epoch_loss = running_loss / dataloaders[phase].batch_sampler.num_samples
-            epoch_loss_r = running_loss_r / running_TP_count
+            epoch_loss_r = running_loss_r / dataloaders[phase].batch_sampler.num_samples
             epoch_loss_c = running_loss_c / dataloaders[phase].batch_sampler.num_samples
             epoch_r_mse = running_r_sq_error / running_TP_count
+            epoch_acc = running_corrects / dataloaders[phase].batch_sampler.num_samples
+            epoch_r_rmse = torch.sqrt(epoch_r_mse)
 
             # end of epoch wandb logging
             if not args.no_wb:
@@ -291,19 +292,19 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                     train_metrics = {"train/train_avg_loss" : epoch_loss,
                                      "train/train_avg_loss_c" : epoch_loss_c,
                                      "train/train_avg_loss_r" : epoch_loss_r,
-                                     "train/train_r_rmse" : torch.sqrt(epoch_r_mse),
-                                     "train/acc" : running_corrects / dataloaders[phase].batch_sampler.num_samples,}
+                                     "train/train_r_rmse" : epoch_r_rmse,
+                                     "train/acc" : epoch_acc,}
                     wandb.log({**step_metrics, **train_metrics})
                 else:
                     val_metrics = {"val/val_avg_loss" : epoch_loss,
                                    "val/val_avg_loss_c" : epoch_loss_c,
                                    "val/val_avg_loss_r" : epoch_loss_r,
-                                   "val/val_r_rmse" : torch.sqrt(epoch_r_mse),
-                                   "val/acc" : running_corrects / dataloaders[phase].batch_sampler.num_samples,}
+                                   "val/val_r_rmse" : epoch_r_rmse,
+                                   "val/acc" : epoch_acc,}
                     wandb.log(val_metrics)
 
             # print epoch information
-            print("{} Loss: {:.4f} -- RMSE: {:.4f} km -- ACC: {:.4F} -- LVr: {:.4f} -- LVc: {:.4f}".format(phase, epoch_loss, torch.sqrt(epoch_r_mse), running_corrects / dataloaders[phase].batch_sampler.num_samples, criterion.log_vars[0], criterion.log_vars[1]))
+            print("{} Loss: {:.4f} -- RMSE: {:.4f} km -- ACC: {:.4F} -- LVr: {:.4f} -- LVc: {:.4f}".format(phase, epoch_loss, epoch_r_rmse, epoch_acc, criterion.log_vars[0], criterion.log_vars[1]))
 
             # check if we update best model
             if phase == 'val' and epoch_r_mse < best_mse:
