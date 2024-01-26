@@ -79,7 +79,7 @@ class UncertainSelectiveMSEAndClass(nn.Module):
 
         # Learned variables for weighting the tasks
         if log_var_list is None:
-            self.log_vars = [torch.tensor(0., requires_grad=True, device=device), torch.tensor(0., requires_grad=True, device=device)]
+            self.log_vars = [torch.tensor(0., dtype=torch.float32, requires_grad=True, device=device), torch.tensor(0., dtype=torch.float32, requires_grad=True, device=device)]
         else:
             self.log_vars = [torch.tensor(log_var_list[0].item(), dtype=torch.float32, requires_grad=True, device=device), torch.tensor(log_var_list[1].item(), dtype=torch.float32, requires_grad=True, device=device)]
 
