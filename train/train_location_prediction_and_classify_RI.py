@@ -47,6 +47,8 @@ parser.add_argument('--verbose', action='store_true',
                     help='display progress while training (default: False)')
 parser.add_argument('--wb_id', type=str, nargs=None,
                     help='id of weights and biases run to continue (default: None)')
+parser.add_argument('--wb_project', type=str, default='simultaneous-range-classify-sbcex2022',
+                    help='id of weights and biases run to continue (default: None)')
 parser.add_argument('--no_wb', action='store_true',
                     help='disable weights and biases logging (default: False)')
 
@@ -61,14 +63,14 @@ if not args.no_wb:
     # get epochs currently trained for if resuming
     if args.wb_id is not None:
         api = wandb.Api()
-        run = api.run("markg98/simultaneous-range-classify/" + args.wb_id)
+        run = api.run(f"markg98/{args.wb_project}/" + args.wb_id)
         epoch_offset = run.config['epochs']
     else:
         epoch_offset = 0
     
     # intialize
     wandb.init(
-        project="simultaneous-range-classify",
+        project=args.wb_project,
         config={
             "epochs" : args.end_epoch - args.start_epoch + 1 + epoch_offset,
             "batch_size" : args.batch_size,
@@ -77,8 +79,6 @@ if not args.no_wb:
             "nperseg" : config['stft']['nperseg'],
             "noverlap" : config['stft']['noverlap'],
             "nfft" : config['stft']['nfft'],
-            "max_x" : config['scaling']['max_x'],
-            "max_y" : config['scaling']['max_y'],
             "max_r" : config['scaling']['max_r'],
             "checkpoint_directory" : args.checkpoint_dir,
             "num_channels" : args.channels,
@@ -263,7 +263,7 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                     running_r_sq_error += r_mse.sum()
 
                     # running class
-                    running_TP_count += len(outputs_r_TP)
+                    running_TP_count += len(r_mse)
 
                 running_corrects += ((F.softmax(outputs[:,1:].detach(),dim=1)[:,1].squeeze() >= 0.5) == targets_c.detach().squeeze()).sum()
             
