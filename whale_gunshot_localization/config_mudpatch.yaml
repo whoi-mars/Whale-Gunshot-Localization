@@ -19,24 +19,7 @@ stft:
   noverlap: 56
   nfft: 463
 scaling:
-  # small and reduced tossit
-  # max_x: 13383.049267
-  # min_x: -4690.965723
-  # max_y: 2779.864302
-  # min_y: -16123.212949
-  # max_r: 21777.249126
-  # 1.5 km around network
-  # max_x: 11794.090834
-  # min_x: -1517.368411
-  # max_y: 1389.932151
-  # min_y: -11397.443636
-  # max_r: 16394.476413
-  # 4 sensors
-  # max_x: 14016.143880
-  # min_x: -2485.621575
-  # max_y: 8988.227908
-  # min_y: -6579.012180
-  max_r: 19794.982956
+  max_r: 30000
 models:
   checkpoints_directories: "/media/mark/extradrive2/models"
-  model_dir: "range_classify_small_4"
+  model_dir: "sbcex2022"
