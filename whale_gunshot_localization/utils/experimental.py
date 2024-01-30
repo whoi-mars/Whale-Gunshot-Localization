@@ -16,7 +16,7 @@ import hypernetx as hnx
 import hypernetx.algorithms.hypergraph_modularity as hmod
 import networkx as nx 
 
-from whale_gunshot_localization.utils.transformations import to_spect
+from whale_gunshot_localization.utils.transformations import to_spect, get_image_transform_range_classify
 import whale_gunshot_localization.utils.math_tools as math_tools
 
 # load config file
@@ -1020,21 +1020,23 @@ class WAVReader:
             if file is not None and timestamp + np.timedelta64(self.chunk_size, 's') < self.end_time_map[idx][file]:
                 files.append(file)
             else:
-                return False, np.asarray([]), np.asarray([])
+                return False, np.asarray([]), np.asarray([]), np.asarray([])
 
         # if all files and corresponding time stamp are valid get audio
         data = []
+        file_times = []
         for idx, file in enumerate(files):
             file_timestamp = (timestamp - self.start_time_map[idx][file]).astype('timedelta64[s]').astype(float)
+            file_times.append(file_timestamp)
             file_samplerate = librosa.get_samplerate(path=file)
             y, _ = librosa.load(file, sr=file_samplerate, offset=file_timestamp, duration=self.chunk_size)
             if self.fs_desired:
                 y = resample_poly(y, self.fs_desired, file_samplerate)
             data.append(y)
         
-        return True, np.asarray(files), np.asarray(data)
+        return True, np.asarray(files), np.asarray(data), np.asarray(file_times)
 
-def l2_standardize(examples, mu_list, std_list):
+class L2Standardize:
     """
     Mean-center, L2 normalizer, convert to spectrogram, and standardize a
     batch of inputs.
@@ -1053,21 +1055,21 @@ def l2_standardize(examples, mu_list, std_list):
     torch.Tensor, (# examples, # frequency bins, # time bins)
         preprocessed collabed examples from experimental data
     """
+    def __init__(self, mu_list, std_list):
+        self.preprocessor = get_image_transform_range_classify(mu_list, std_list)['eval']
 
-    # mean-center
-    examples = examples - examples.mean(axis=2, keepdims=True)
+    def __call__(self, examples):
+        # mean-center
+        examples = examples - examples.mean(axis=2, keepdims=True)
 
-    # l2 norm
-    examples = examples / np.sqrt(np.sum(examples ** 2, axis=2, keepdims=True))
+        # l2 norm
+        examples = examples / np.sqrt(np.sum(examples ** 2, axis=2, keepdims=True))
 
-    # convert to spectrograms
-    spect_examples = to_spect(examples).squeeze(axis=2)
+        # convert to spectrograms
+        spect_examples = torch.from_numpy(to_spect(examples).copy()).float()
 
-    # standardize
-    spect_examples = (spect_examples - mu_list) / std_list
-
-    # return as PyTorch Tensor
-    return torch.from_numpy(spect_examples).float()
+        # standardize
+        return self.preprocessor(spect_examples)
 
 
 class ClipAnalyzer:
@@ -1113,10 +1115,6 @@ class ClipAnalyzer:
             model which performs detection and range estimation
         data_params : dict
             dictionary containing the following key-value pairs:
-            mu_list : array-like
-                mean for each spectrogram row across training set
-            std_list : array-like
-                std for each spectrogram row across training set
             fs : float
                 sampling frequency
             T : float
@@ -1139,10 +1137,6 @@ class ClipAnalyzer:
 
         # method to preprocess a batch of data
         self.preprocessor = preprocessor
-
-        # mu/std for standardizing data
-        self.mu_list = np.expand_dims(data_params['mu_list'], axis=-1)
-        self.std_list = np.expand_dims(data_params['std_list'], axis=-1)
 
         # size of window for model
         self.fs = data_params['fs']
@@ -1235,7 +1229,7 @@ class ClipAnalyzer:
         collated_batch = self._collate_samples(clips)
 
         # preprocessing
-        preprocessed_batch = self.preprocessor(collated_batch, self.mu_list, self.std_list).to(self.device)
+        preprocessed_batch = self.preprocessor(collated_batch).to(self.device)
 
         # run through model
         with torch.set_grad_enabled(False):
