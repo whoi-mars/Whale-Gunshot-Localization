@@ -263,7 +263,7 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
                     running_r_sq_error += r_mse.sum()
 
                     # running class
-                    running_TP_count += len(r_mse)
+                    running_TP_count += torch.numel(r_mse)
 
                 running_corrects += ((F.softmax(outputs[:,1:].detach(),dim=1)[:,1].squeeze() >= 0.5) == targets_c.detach().squeeze()).sum()
             
