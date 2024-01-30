@@ -193,46 +193,8 @@ def random_wrap(x):
     # shift
     # return np.roll(x, shift=np.random.randint(low=0, high=max_shifts))
 
-def get_image_transform(stats=False):
-    """
-    Gets dictionary of spectrogram preprocessing transforms for training and evaluation.
 
-    Parameters
-    ----------
-    stats : bool
-        whether or not to load the stats transforms exclusively
-
-    Returns
-    -------
-    dict
-        dictionary with training and evaluation preprocessing transforms
-    """
-
-    if stats:
-        # transforms for calculating stats
-        transform_stats = transforms.Compose([
-            BlockTOSSIT(3),
-        ])
-        return {'stats' : transform_stats}
-
-    # load mean and std
-    mu_list = np.load(config['dataset']['data_directory'] + '/mean.npy', allow_pickle=True)
-    std_list = np.load(config['dataset']['data_directory'] + '/std.npy', allow_pickle=True)
-    
-    # evaluation transforms
-    transform_eval = transforms.Compose([
-        Normalize1DChannel(mu_list, std_list)
-    ])
-
-    # training transforms
-    transform_train = transforms.Compose([
-        Normalize1DChannel(mu_list, std_list),
-        BlockTOSSIT(3),
-    ])
-
-    return {'train' : transform_train, 'eval' : transform_eval}
-
-def get_image_transform_range_classify():
+def get_image_transform_range_classify(mu_list=None, std_list=None):
     """
     Gets dictionary of spectrogram preprocessing transforms for training and evaluation.
 
@@ -243,8 +205,10 @@ def get_image_transform_range_classify():
     """
 
     # load mean and std
-    mu_list = np.load(config['dataset']['data_directory'] + '/mean_range_classification.npy', allow_pickle=True)
-    std_list = np.load(config['dataset']['data_directory'] + '/std_range_classification.npy', allow_pickle=True)
+    if mu_list is None:
+        mu_list = np.load(config['dataset']['data_directory'] + '/mean_range_classification.npy', allow_pickle=True)
+    if std_list is None:
+        std_list = np.load(config['dataset']['data_directory'] + '/std_range_classification.npy', allow_pickle=True)
 
     # evaluation transforms
     transform_eval = transforms.Compose([
