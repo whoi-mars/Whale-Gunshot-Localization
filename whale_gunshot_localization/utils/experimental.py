@@ -631,7 +631,7 @@ class Localizer:
             Final associations
         """
 
-        assert self.measurements, "measurements have not been set"
+        assert self.measurements is not None, "measurements have not been set"
 
         for a_idx in range(len(associations)):
             for m in self.formatted_linear_idx:
@@ -671,7 +671,7 @@ class Localizer:
                     associations[a_idx] = best_assoc
                     locs[a_idx] = best_loc         
 
-        return [assoc for assoc in associations if len(assoc) >= 3], np.asarray([loc for i, loc in enumerate(locs) if len(associations[i]) >= 3])
+        return [assoc for assoc in associations if len(assoc) >= self.k], np.asarray([loc for i, loc in enumerate(locs) if len(associations[i]) >= self.k])
 
     def associate_and_localize(self, reduce_dups=True, last_step=True):
         """
@@ -697,7 +697,7 @@ class Localizer:
         """
         
         # make sure we've set measurements
-        assert self.measurements, "measurements have not been set"
+        assert self.measurements is not None, "measurements have not been set"
         
         HG = hmod.precompute_attributes(self.H)
         associations = hmod.kumar(HG)
@@ -1069,7 +1069,7 @@ class L2Standardize:
         spect_examples = torch.from_numpy(to_spect(examples).copy()).float()
 
         # standardize
-        return self.preprocessor(spect_examples)
+        return self.preprocessor(spect_examples).squeeze()
 
 
 class ClipAnalyzer:
