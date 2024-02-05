@@ -19,11 +19,12 @@ stft:
   noverlap: 56
   nfft: 463
 scaling:
-  max_r: 30000
+  max_r: 15000
+  min_r: 4000
   min_x: -13000
   max_x: -9000
   min_y: -8000
   max_y: -4000
 models:
   checkpoints_directories: "/media/mark/extradrive2/models"
-  model_dir: "sbcex2022"
+  model_dir: "sbcex2022_short_range"
