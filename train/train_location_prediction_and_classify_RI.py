@@ -35,8 +35,6 @@ parser.add_argument('--kernel_size', type=int, default=6,
                     help='size of 1D kernel (default: 6)')
 parser.add_argument('--dropout', type=float, default=0.2,
                     help='spatial dropout parameter (default: 0.2)')
-parser.add_argument('--weight_decay', type=float, default=0.0,
-                    help='weight decay (default: 0.0)')
 parser.add_argument('--save_all_epochs', action='store_true',
                     help='store weights for all epochs during training (default: False)')
 parser.add_argument('--DP', action='store_true',
@@ -83,7 +81,6 @@ if not args.no_wb:
             "checkpoint_directory" : args.checkpoint_dir,
             "num_channels" : args.channels,
             "dropout" : args.dropout,
-            "weight_decay" : args.weight_decay,
         },
         id=args.wb_id,
         resume= True if args.wb_id is not None else False
@@ -142,13 +139,13 @@ if args.start_epoch > 1:
     # set loss
     criterion = UncertainSelectiveMSEAndClass(log_var_list=log_var_list, device=device)
     # initialize optimizer
-    optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr)
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 else:
     # set loss
     criterion = UncertainSelectiveMSEAndClass(device=device)
     # initialize optimizer
-    optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr, weight_decay=args.weight_decay)
+    optimizer = torch.optim.Adam([p for p in model.parameters()] + [lv for lv in criterion.log_vars], lr=args.lr)
 
 # data parallel
 if args.DP:
@@ -213,7 +210,6 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
     for epoch in range(start_epoch, end_epoch+1):
         print(f"Epoch {epoch}/{end_epoch}")
         print('-'*10)
-
         for phase in ['train', 'val']:
             if phase == 'train':
                 model.train()
@@ -230,7 +226,6 @@ def train(model, dataloaders, criterion, optimizer, end_epoch=args.end_epoch, sa
 
             # process batches
             for step, (inputs, targets_c, targets_r) in enumerate(tqdm(dataloaders[phase], disable=not verbose)):
-
                 # put data/labels on device
                 inputs = inputs.to(device)
                 targets_c = targets_c.to(device)
