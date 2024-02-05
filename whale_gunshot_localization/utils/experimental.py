@@ -350,7 +350,7 @@ class Localizer:
         Python object used to perform multilateration
     """
     
-    def __init__(self, k, multilat, consistency_thresh=1000, dup_thresh=4000, prune=False):
+    def __init__(self, k, multilat, consistency_thresh=1000, dup_thresh=4000, prune=False, TOSSIT_locations=None):
         """
         Construct attributes
         
@@ -370,7 +370,7 @@ class Localizer:
         """
         
         # load TOSSIT locations
-        self.TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
+        self.TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T if TOSSIT_locations is None else TOSSIT_locations
         
         # initialize empty measurements and hypergraph
         self.measurements = None
