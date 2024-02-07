@@ -105,7 +105,6 @@ dl = get_dataloaders_range_classify_RI(splits=['train', 'val'],
                                        drop_last=False,
                                        shuffle=True,
                                        transform=get_image_transform_range_classify(),
-                                       squeeze=True,
                                        num_workers=20,
                                        pin_memory=True)
 n_steps_per_epoch = len(dl['train'].batch_sampler)
