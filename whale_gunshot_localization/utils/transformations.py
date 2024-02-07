@@ -144,26 +144,30 @@ class FrequencyBandZeroing:
             spectrogram with zeroed-out frequencies
         """
 
-        if len(x.shape) == 3:
-            x = x.unsqueeze(1)
-            N, _, H, W = x.shape
-        elif len(x.shape) == 4:
-            N, _, H, W = x.shape
-        else:
-            raise ValueError(f"x must be shape (N, H, W) or (N, C, H, W), is now {len(x.shape)}")
+        # if len(x.shape) == 3:
+        #     x = x.unsqueeze(1)
+        #     N, _, H, W = x.shape
+        # elif len(x.shape) == 4:
+        #     N, _, H, W = x.shape
+        # else:
+        #     raise ValueError(f"x must be shape (N, H, W) or (N, C, H, W), is now {len(x.shape)}")
+
+        assert len(x.shape) == 2, f"x must be shape (H, W), is now {x.shape}"
+
+        H, W = x.shape
         
         zero_width_f = torch.randint(0, self.max_freq_width, size=(self.num_f,))
         offset_f = torch.randint(0, H - zero_width_f.max(), size=(self.num_f,))
 
         for wf, of in zip(zero_width_f, offset_f):
-            x[:,:,of:(of + wf),:] = 0
+            x[of:(of + wf),:] = 0
 
         if self.num_t:
             zero_width_t = torch.randint(0, self.max_t_width, size=(self.num_t,))
             offset_t = torch.randint(0, W - zero_width_t.max(), size=(self.num_t,))
             
             for wf, of in zip(zero_width_t, offset_t):
-                x[:,:,:,of:(of + wf)] = 0
+                x[:,of:(of + wf)] = 0
 
         return x
 
