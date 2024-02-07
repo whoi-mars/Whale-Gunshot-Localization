@@ -267,7 +267,7 @@ class SimDataRangeClassifyRI(data.Dataset):
         whether or not to eliminate the singleton channel dimension
     """
 
-    def __init__(self, split, transform=None, squeeze=False, sensors=None):
+    def __init__(self, split, transform=None, sensors=None):
         """
         Construct attributes and grab reference to data file
 
@@ -300,7 +300,6 @@ class SimDataRangeClassifyRI(data.Dataset):
         self.size = to_spect(self.data[0]).shape[1:]
 
         self.transform = transform
-        self.squeeze = squeeze
 
     def __getitem__(self, idx):
 
@@ -317,16 +316,12 @@ class SimDataRangeClassifyRI(data.Dataset):
             target_r = self._from_numpy(np.asarray([-1]))
 
         # convert to spectrogram
-        inputs = self._from_numpy(to_spect(inputs).copy())
+        inputs = self._from_numpy(to_spect(inputs).copy()).squeeze()
 
         # transform
         if self.transform is not None:
             inputs = self.transform(inputs)
 
-        # squeeze
-        if self.squeeze:
-            inputs = inputs.squeeze()
-    
         return inputs, target_c, target_r
 
     def __len__(self):
@@ -404,7 +399,7 @@ def get_dataloaders_range_classify_eval_loc(splits, batch_size, drop_last=False,
     # return dataloaders
     return dataloaders
 
-def get_dataloaders_range_classify_RI(splits, batch_size, shuffle=True, drop_last=False, transform=None, squeeze=False, num_workers=10, pin_memory=False):
+def get_dataloaders_range_classify_RI(splits, batch_size, shuffle=True, drop_last=False, transform=None, num_workers=10, pin_memory=False):
     """
     Construct dictionary of dataloaders for splits ('train', 'val', 'test'), for the range/classification tasks.
 
@@ -417,9 +412,7 @@ def get_dataloaders_range_classify_RI(splits, batch_size, shuffle=True, drop_las
     shuffle : bool
         whether or not to shuffle the training set
     transform : PyTorch Compose object
-        desired data transformations
-    squeeze : bool
-        whether or not to eliminate the singleton channel dimension     
+        desired data transformations    
 
     Returns
     -------
@@ -438,7 +431,7 @@ def get_dataloaders_range_classify_RI(splits, batch_size, shuffle=True, drop_las
             data_transform[split] = transform['eval'] if transform is not None else transform
 
     # prepare datasets
-    datasets = {x : SimDataRangeClassifyRI(split=x, transform=data_transform[x], squeeze=squeeze) for x in data_transform.keys()}
+    datasets = {x : SimDataRangeClassifyRI(split=x, transform=data_transform[x]) for x in data_transform.keys()}
 
     # prepare dataloaders
     dataloaders = {x : data.DataLoader(datasets[x], num_workers=num_workers, batch_sampler=H5BatchSampler(split=x, batch_size=batch_size, drop_last=drop_last, shuffle=False if x != 'train' else shuffle), pin_memory=pin_memory) for x in data_transform.keys()}

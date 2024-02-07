@@ -138,7 +138,6 @@ class MultilaterationOpt(MultilaterationBase):
             # return (1 / len(ranges))*np.sum((l2.squeeze() - ranges.squeeze()) ** 2)
             return l2.squeeze() - ranges.squeeze()
 
-
         # random initial guess
         # x0 = [self.rng.uniform(self.min_y, self.max_y), self.rng.uniform(self.min_x, self.max_x)]
         # x0 = [(config['scaling']['min_y'] + config['scaling']['max_y']) / 2, (config['scaling']['min_x'] + config['scaling']['max_x']) / 2]
@@ -720,69 +719,6 @@ class Localizer:
         return associations, locs
 
 #######################################################################################################################
-#                                             Sensor Network Metrics                                                  #
-#######################################################################################################################
-
-def calculate_GDOP_map(x_vec, y_vec, TOSSIT_locs):
-    
-    # initialize matrix for GDOP results
-    GDOP = np.zeros((len(y_vec), len(x_vec)))
-
-    # make meshgrid to calculate GDOP over
-    X, Y = np.meshgrid(x_vec, y_vec)
-
-    # create a meshgrid for each sensor
-    X_3d = np.tile(X[:,:,np.newaxis], (1, 1, TOSSIT_locs.shape[0]))
-    Y_3d = np.tile(Y[:,:,np.newaxis], (1, 1, TOSSIT_locs.shape[0]))
-
-    # calculate distances between sample points
-    sensors_y = np.reshape(TOSSIT_locs[:,1], (1, 1, TOSSIT_locs.shape[0]))
-    sensors_x = np.reshape(TOSSIT_locs[:,0], (1, 1, TOSSIT_locs.shape[0]))
-
-    R = np.sqrt(((sensors_x - X_3d) ** 2) + ((sensors_y - Y_3d) ** 2))
-
-    # calculate normalized position vectors
-    X_3d_div = (sensors_x - X_3d) / R
-    Y_3d_div = (sensors_y - Y_3d) / R
-
-    # calculate GDOP
-    for i in range(GDOP.shape[0]):
-        for j in range(GDOP.shape[1]):
-            A = np.stack((X_3d_div[i, j, :], Y_3d_div[i, j, :]), axis=1)
-            try:
-                Q = (1000 ** 2) * np.linalg.inv(A.T @ A)
-            except:
-                Q = (1000 ** 2) * np.linalg.pinv(A.T @ A)
-                print(i, j)
-            GDOP[i, j] = np.sqrt(np.trace(Q))
-
-    return GDOP
-
-def calculate_GDOP_locs(x, y, TOSSIT_locs, TOSSIT_IDs):
-
-    GDOP = np.zeros((len(x),))
-
-    for i, (px, py, Tids) in enumerate(zip(x, y, TOSSIT_IDs)):
-
-        sensors_y = np.reshape(TOSSIT_locs[Tids,1], (1, 1, len(Tids)))
-        sensors_x = np.reshape(TOSSIT_locs[Tids,0], (1, 1, len(Tids)))
-
-        R = np.sqrt(((sensors_x - px) ** 2) + ((sensors_y - py) ** 2))
-
-        x_div = (sensors_x - px) / R
-        y_div = (sensors_y - py) / R
-
-        A = np.stack((x_div.squeeze(), y_div.squeeze()), axis=1)
-        try:
-            Q = (1000 ** 2) * np.linalg.inv(A.T @ A)
-        except:
-            Q = (1000 ** 2) * np.linalg.pinv(A.T @ A)
-        GDOP[i] = np.sqrt(np.trace(Q))
-
-    return GDOP
-
-
-#######################################################################################################################
 #                                                  WAV File Tools                                                     #
 #######################################################################################################################
 
@@ -1043,7 +979,7 @@ class L2Standardize:
 
     Parameters
     ----------
-    examples : array-like, (# examples, samples / example)
+    examples : array-like, (# examples, # sensors, samples / example)
         raw collated examples from experimental data
     mu_list : array-like
         mean for each spectrogram row across training set
@@ -1059,17 +995,21 @@ class L2Standardize:
         self.preprocessor = get_image_transform_range_classify(mu_list, std_list)['eval']
 
     def __call__(self, examples):
+
+        # print("examples", examples.shape)
         # mean-center
-        examples = examples - examples.mean(axis=2, keepdims=True)
+        examples = examples - examples.mean(axis=-1, keepdims=True)
+        # print("examples", examples.shape)
 
         # l2 norm
-        examples = examples / np.sqrt(np.sum(examples ** 2, axis=2, keepdims=True))
+        examples = examples / np.sqrt(np.sum(examples ** 2, axis=-1, keepdims=True))
 
         # convert to spectrograms
-        spect_examples = torch.from_numpy(to_spect(examples).copy()).float()
+        spect_examples = torch.from_numpy(to_spect(examples).copy()).float().squeeze()
+        # print("Spect_examples", spect_examples.shape)
 
         # standardize
-        return self.preprocessor(spect_examples).squeeze()
+        return self.preprocessor(spect_examples)
 
 
 class ClipAnalyzer:
