@@ -27,4 +27,4 @@ scaling:
   max_y: -4000
 models:
   checkpoints_directories: "/media/mark/extradrive2/models"
-  model_dir: "sbcex2022_short_range"
+  model_dir: "sbcex2022_4_15_km"
