@@ -135,8 +135,7 @@ class MultilaterationOpt(MultilaterationBase):
             l2 = np.sqrt((self.TOSSIT_locations[sensors_idx,0] - x[0]) ** 2 + (self.TOSSIT_locations[sensors_idx,1] - x[1]) ** 2)
 
             # return sum squared error between l2s and predicted ranges
-            # return (1 / len(ranges))*np.sum((l2.squeeze() - ranges.squeeze()) ** 2)
-            return l2.squeeze() - ranges.squeeze()
+            return (l2.squeeze() - ranges.squeeze())
 
         # random initial guess
         # x0 = [self.rng.uniform(self.min_y, self.max_y), self.rng.uniform(self.min_x, self.max_x)]
@@ -349,7 +348,7 @@ class Localizer:
         Python object used to perform multilateration
     """
     
-    def __init__(self, k, multilat, consistency_thresh=1000, dup_thresh=4000, prune=False, TOSSIT_locations=None):
+    def __init__(self, k, multilat, consistency_thresh=1000, dup_thresh=4000, prune=False, TOSSIT_locations=None, min_assoc_size=None):
         """
         Construct attributes
         
@@ -370,7 +369,7 @@ class Localizer:
         
         # load TOSSIT locations
         self.TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T if TOSSIT_locations is None else TOSSIT_locations
-        
+
         # initialize empty measurements and hypergraph
         self.measurements = None
         self.formatted_linear_idx = None
@@ -386,6 +385,12 @@ class Localizer:
         else:
             raise ValueError(f"k must be > 3 and < {self.TOSSIT_locations.shape[0]}.")
         
+        if min_assoc_size is not None:
+            self.min_assoc_size = min_assoc_size
+        else:
+            self.min_associ_size = self.k
+
+
         # thresholds
         self.consistency_thresh = consistency_thresh
         
@@ -670,7 +675,7 @@ class Localizer:
                     associations[a_idx] = best_assoc
                     locs[a_idx] = best_loc         
 
-        return [assoc for assoc in associations if len(assoc) >= self.k], np.asarray([loc for i, loc in enumerate(locs) if len(associations[i]) >= self.k])
+        return [assoc for assoc in associations if len(assoc) >= self.min_assoc_size], np.asarray([loc for i, loc in enumerate(locs) if len(associations[i]) >= self.min_assoc_size])
 
     def associate_and_localize(self, reduce_dups=True, last_step=True):
         """
