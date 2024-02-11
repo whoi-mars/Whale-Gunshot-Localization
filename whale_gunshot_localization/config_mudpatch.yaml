@@ -21,10 +21,10 @@ stft:
 scaling:
   max_r: 22000
   min_r: 4000
-  min_x: -13000
-  max_x: -9000
-  min_y: -8000
-  max_y: -4000
+  min_x: -10000
+  max_x: 10000
+  min_y: -10000
+  max_y: 6000
 models:
   checkpoints_directories: "/media/mark/extradrive2/models"
-  model_dir: "sbcex2022_4_15_km"
+  model_dir: "sbcex2022_4_22_km"

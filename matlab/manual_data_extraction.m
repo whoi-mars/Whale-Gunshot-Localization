@@ -15,35 +15,36 @@ files = ["/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5483/5483
          "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6468/6468.220523155511.wav"
          "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6470/6470.220523184339.wav"
          "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6476/6476.220523182736.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6465/6465.220524014109.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5783/5783.220524005201.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6465/6465.220523134117.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5783/5783.220523125210.wav"
          "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6473/6473.220523172921.wav"
          "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6477/6477.220523165055.wav"
          "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6472/6472.220523150538.wav"
          "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5818/5818.220523190912.wav"];
-timestamps = [31373+6-10,
-              33539+16-10,
-              34318+10-10,
-              29136+11-10,
-              28162+10-10,
-              40803+14-10,
-              41756+11-10,
-              36955+8-10,
-              35839+10-10,
-              25731+14-10,
-              26694+13-10,
-              681+11-10,
-              3629+15-10,
-              30189+13-10,
-              32495+10-10,
-              38812+10-10,
-              24198+2-10];
-location = [40.46041598, -70.56697802];
+timestamps = [23378+5
+              25544+11 
+              26323+4
+              21141+9 
+              20167+8
+              32808+3
+              33761+1
+              28960+2
+              27844+3
+              17736+13
+              18699+12
+              35878+8
+              38825+10
+              22194+11
+              24500+7
+              30817+6
+              16203+2];
+source_id = zeros(17,1,'single');
+location = [40.505923, -70.49119304];
 
 % settings
 fs_save = 600; % [Hz]
-T = 20; % [s]
-save_index = 49;
+T = 6; % [s]
+save_index = 44;
 
 %% Save Audio
 
@@ -82,7 +83,7 @@ end
 % save calls
 root = split(config.dataset.ccb_data_directory,"/");
 root = fullfile(strjoin(root(1:5),"/"), "single_examples");
-file_name = sprintf(fullfile(root, "gunshots_long_%d.h5"), save_index);
+file_name = sprintf(fullfile(root, "gunshots_%d.h5"), save_index);
 h5create(file_name, "/data", size(calls), 'Datatype','single');
 h5create(file_name, "/sensors", size(sensorIDs),'Datatype','single');
 h5create(file_name, "/location", size(location),'Datatype','single');
