@@ -16,6 +16,10 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
         variance of Gaussian noise added to range measurements
     num_delete : int
         maximum number of measurements to hide/delete at each source
+    in_sensors : bool
+        whether or not to limit sampled locations to be in the rectangle that the network inscribes
+    TOSSIT_locations : np.ndarray
+        N X 2 matrix of sensor locations
         
     Returns
     -------

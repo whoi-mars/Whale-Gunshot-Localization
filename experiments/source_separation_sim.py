@@ -16,7 +16,6 @@ import seaborn as sns
 
 from whale_gunshot_localization.utils.experimental import Localizer, MultilaterationOpt
 import whale_gunshot_localization.sim_tools.sim_datagen as sim_datagen
-import whale_gunshot_localization.sim_tools.sim_data_checks as sim_data_checks
 import whale_gunshot_localization.utils.math_tools as math_tools
 from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 
@@ -59,6 +58,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data
         - multilat : MultilaterationBase --> instantiated multilateration object to use
         - consistency_thresh : float --> dict which maps std --> group-k threshhold
         - prune : bool --> ensure that all measurements in k-1 subgroups intersect to count as a consistent set
+        - min_assoc_size : int --> minumum number of measurements required for a valid association
     data_gen_params : dict
         dictionary of parameters for sparse source generation
         - num_delete : int --> maximum number of farthest range measuremnets to delete for a given source (chosen from uniform distribution)
@@ -92,7 +92,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data
     possible_associations = []
     for p in range(max(assoc_flat) + 1):
         group = np.where(assoc_flat == p)[0]
-        if len(group) >= localizer_params["k"]:
+        if len(group) >= localizer_params["min_assoc_size"]:
             possible_associations.append(p)
     possible = len(possible_associations) > 0
 
@@ -303,13 +303,13 @@ if __name__ == "__main__":
                              set_measurement_params=set_measurement_params,
                              data_gen_params=data_gen_params)
         df.to_csv(path, index=False)
-
-    # read results
-    df = pd.read_csv(path)
     
     ##########################################
     #               make plots               #
     ##########################################
+
+    # read results
+    df = pd.read_csv(path)
 
     # matlab settings
     matplotlib.rcParams.update({'font.size': 16})
