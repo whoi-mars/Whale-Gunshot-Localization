@@ -2,7 +2,7 @@ import numpy as np
 
 from whale_gunshot_localization import config
 
-def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=False):
+def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=False, TOSSIT_locations=None):
     """
     Generate some synthetic measurements to test with data association/localization algoritms.
     
@@ -36,7 +36,7 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
     assert num_delete >= 0, "max signals to delete at each sensor must be non-negative"
     
     # get TOSSIT locations and extreme coordinate values
-    TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
+    TOSSIT_locations = TOSSIT_locations if TOSSIT_locations is not None else np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
     if in_sensors:
         min_x = np.min(TOSSIT_locations[:,1])
         max_x = np.max(TOSSIT_locations[:,1])
