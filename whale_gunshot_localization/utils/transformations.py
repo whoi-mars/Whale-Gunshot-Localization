@@ -223,7 +223,7 @@ def get_image_transform_range_classify(mu_list=None, std_list=None):
     # training transforms
     transform_train = transforms.Compose([
         Normalize1DChannel(mu_list, std_list),
-        FrequencyBandZeroing(max_freq_width=30, num_t=0),
+        FrequencyBandZeroing(max_freq_width=15, num_t=0),
     ])
 
     return {'train' : transform_train, 'eval' : transform_eval}
