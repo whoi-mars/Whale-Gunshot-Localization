@@ -71,16 +71,29 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
         source_associations.append(np.arange(num_sources))
     
     # delete from each source
+    # if num_delete:
+    #     num_delete = rng.choice(num_delete)
+    #     for s in range(num_sources): 
+    #         distances = np.sqrt(((TOSSIT_locations - source_locs[s,:]) ** 2).sum(axis=1))
+    #         to_delete = np.argsort(distances)[::-1][:num_delete]
+    #         for d in to_delete:
+    #             idx = np.argwhere(source_associations[d] == s)
+    #             range_measurements[d] = np.delete(range_measurements[d], idx)
+    #             source_associations[d] = np.delete(source_associations[d], idx)
+    #             TOSSIT_associations[d] = np.delete(TOSSIT_associations[d], idx)
     if num_delete:
-        num_delete = rng.choice(num_delete)
-        for s in range(num_sources): 
-            distances = np.sqrt(((TOSSIT_locations - source_locs[s,:]) ** 2).sum(axis=1))
-            to_delete = np.argsort(distances)[::-1][:num_delete]
-            for d in to_delete:
-                idx = np.argwhere(source_associations[d] == s)
-                range_measurements[d] = np.delete(range_measurements[d], idx)
-                source_associations[d] = np.delete(source_associations[d], idx)
-                TOSSIT_associations[d] = np.delete(TOSSIT_associations[d], idx)
+        for i in range(num_delete):
+            while True:
+                try:
+                    sen = rng.choice(TOSSIT_locations.shape[0])
+                    idx = rng.choice(len(range_measurements[sen]))
+                except:
+                    continue
+                range_measurements[sen] = np.delete(range_measurements[sen], idx)
+                source_associations[sen] = np.delete(source_associations[sen], idx)
+                TOSSIT_associations[sen] = np.delete(TOSSIT_associations[sen], idx)
+                break
+
                 
     # make sure smallest association value is 0
     bias = min([a[0] for a in source_associations if len(a)])
