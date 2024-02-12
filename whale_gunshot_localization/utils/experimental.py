@@ -2,6 +2,7 @@ import os
 import glob
 import itertools
 import warnings
+import math
 
 from bs4 import BeautifulSoup
 import numpy as np
@@ -11,6 +12,9 @@ from scipy.signal import resample_poly, find_peaks
 from scipy.optimize import least_squares
 import pandas as pd
 import librosa
+import dask
+from dask.distributed import Client, LocalCluster
+from multiprocessing import Pool, cpu_count
 
 import hypernetx as hnx
 import hypernetx.algorithms.hypergraph_modularity as hmod
@@ -551,6 +555,419 @@ class Localizer:
         self._tuple_idx = None
         self._sensors = None
         self._ranges = None
+    
+    def _eliminate_dups(self, locs, assocs, thresh=2000):
+        """
+        Eliminate duplicate location estiamtes based on a distance threshold.
+
+        Parameters
+        ----------
+        locs : array-like
+            Matrix of locations of shape N X 2
+        assocs : List[Set]
+            Input associations
+        thresh : float
+            Distance threshold to reduce the location estimates
+
+        Returns
+        -------
+        assocs_no_dups : List[Set]
+            Reduced associations
+        locs_no_dups : array-like
+            Reduced matrix of locations of shape M X 2
+        """
+
+        assocs = np.asarray(assocs, dtype=object)
+        locs_no_dups = []
+        assocs_no_dups = []
+        while True:
+            idx = np.arange(len(locs))
+                        
+            if len(locs) == 1:
+                locs_no_dups.append(locs[0])
+                assocs_no_dups.append(assocs[0])
+                break
+            
+            if len(locs) == 0:
+                break
+
+            # remove the ith location estimate
+            sub_idx = np.delete(idx, 0, axis=0)
+
+            # get distance form ith location estimate to the rest
+            dists = np.sqrt(((locs[sub_idx] - locs[0]) ** 2).sum(axis=1))
+
+            if (dists <= thresh).sum():
+                to_del = [0] + list(sub_idx[dists <= thresh])
+                
+                new_association = set.union(*assocs[to_del])
+                
+                # get sensor indices and ranges
+                sensors = self._sensors[list(new_association)]
+                ranges = self._ranges[list(new_association)]
+                
+                _, loc = self.multilat.localize(ranges, sensors)
+                locs_no_dups.append(loc)
+                assocs_no_dups.append(new_association)
+
+                locs = np.delete(locs, to_del, axis=0)
+                assocs = np.delete(assocs, to_del, axis=0)
+            else:
+                locs_no_dups.append(locs[0])
+                assocs_no_dups.append(assocs[0])
+                locs = np.delete(locs, 0, axis=0)
+                assocs = np.delete(assocs, 0, axis=0)
+
+        return assocs_no_dups, np.asarray(locs_no_dups)
+
+    def _last_step(self, locs, associations):
+        """
+        Greedy algorithm to make sure each association has only one measurement from any given sensor.
+        It finds the lowest cost member of each association among multiple measurements from a given sensor
+        if there are any.
+
+        Parameters
+        ----------
+        locs : array-like
+            Matrix of locations of shape N X 2
+        assocaitions : List[Set]
+            Input associations
+        
+        Returns
+        -------
+        List[Set]
+            Final associations
+        """
+
+        assert self.measurements is not None, "measurements have not been set"
+
+        for a_idx in range(len(associations)):
+            for m in self.formatted_linear_idx:
+                
+                # set of measurements which must be disjoint
+                mask = set(m)
+
+                # intersect mask with associations to find
+                # where more than one member is present
+                intersection = mask.intersection(associations[a_idx])
+
+                # figure out which member of intersection
+                # is the best fit based on localization
+                if len(intersection) > 1:
+                    max_err = float('inf')
+                    best_assoc = None
+                    best_loc = None
+                    for i in itertools.combinations(intersection, len(intersection) - 1):
+
+                        # take away all but one measurement from the sensor measurements
+                        popped_a = associations[a_idx] - set(i)
+
+                        # get sensor indices and ranges
+                        sensors = self._sensors[list(popped_a)]
+                        ranges = self._ranges[list(popped_a)]
+                        
+                        # calculate localization cost and update best
+                        cost, loc = self.multilat.localize(ranges, sensors)
+
+                        if cost < max_err:
+                            max_err = cost
+                            best_assoc = popped_a
+                            best_loc = loc
+                    
+                    # update association
+
+                    associations[a_idx] = best_assoc
+                    locs[a_idx] = best_loc         
+
+        return [assoc for assoc in associations if len(assoc) >= self.min_assoc_size], np.asarray([loc for i, loc in enumerate(locs) if len(associations[i]) >= self.min_assoc_size])
+
+    def associate_and_localize(self, reduce_dups=True, last_step=True):
+        """
+        Using the hypergraph constructed in self.set_measurements, perform data association
+        and localization.
+        
+        Parameters
+        ----------
+        method : string
+            can be either 'clique' (doesn't really work right now) or 'partition'
+        last_step : bool
+            whether to apply a simple last step which ensures only one measurement
+            per sensor is included in a given association. this parameter only matters
+            for the partition method.
+
+        Returns
+        -------
+        associations : List[List] if method is 'clique, List[Set] if method is 'partition'
+            resulting data associations where grouped numbers represent the linear measurement
+            index, traversing self.measurements in sensor-major order
+        locs : array-like of shape N X 2
+            predicted locations of each association set in corresponding order
+        """
+        
+        # make sure we've set measurements
+        assert self.measurements is not None, "measurements have not been set"
+        
+        HG = hmod.precompute_attributes(self.H)
+        associations = hmod.kumar(HG)
+        # if last_step:
+        #     associations = self._last_step(associations)
+
+        locs = []
+        for a in associations:
+            a = list(a)
+            sensors = [self._tuple_idx[idx][0] for idx in a]
+            ranges = self._linear_measurements[a]
+            _, loc = self.multilat.localize(ranges, sensors)
+            locs.append(loc)
+        locs = np.asarray(locs)
+        
+        if last_step:
+            associations, locs = self._last_step(locs, associations)
+        if reduce_dups:
+            associations, locs = self._eliminate_dups(locs, associations, thresh=self.dup_thresh)
+        return associations, locs
+
+class ParLocalizer:
+    """
+    Class to perform data association and range-based localization using 
+    multiple range measurements from multiple sensors.
+    
+    ...
+    
+    Attributes
+    ----------
+    TOSSIT_locations : array-like of shape N X 2
+        locations of the acoustic sensors or the form [y, x]
+    measurements : List[array-like]
+        each sublist contains range measurements associated with a particular sensor
+    H : hypernetx.classes.hypergraph.Hypergraph
+        hypergraph object
+    k : int
+        number of measurements to group when checking for measurement group consistency
+    consistency_thresh : float
+        threshold for distance from range to location to determine which measurements groups
+        are self-consistent
+    prune : bool
+        whether to prune measurement groups based on lack of range measurement intersection
+    multilat : object
+        Python object used to perform multilateration
+    TOSSIT_locations : np.ndarray
+        N X 2 matrix of sensor locations
+    min_assoc_size : int
+        minimum number of measurments to constitute a valid association
+    """
+    
+    def __init__(self, k, multilat, consistency_thresh=1000, dup_thresh=4000, N=None, TOSSIT_locations=None, min_assoc_size=None):
+        """
+        Construct attributes
+        
+        Parameters
+        ----------
+        k : int
+            number of measurements to group when checking for measurement group consistency
+        multilat : object
+            Python object used to perform multilateration
+        consistency_thresh : float
+            threshold for distance from range to location to determine which measurements groups
+            are self-consistent
+        dup_thresh : float
+            threshold for two localization estimates to be reduced to the same estimate
+        N : int
+            number of parallel processes for set_measurements method
+        TOSSIT_locations : np.ndarray
+            N X 2 matrix of sensor locations
+        min_assoc_size : int
+            minimum number of measurments to constitute a valid association
+        """
+        
+        # load TOSSIT locations
+        self.TOSSIT_locations = np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T if TOSSIT_locations is None else TOSSIT_locations
+
+        # initialize empty measurements and hypergraph
+        self.measurements = None
+        self.formatted_linear_idx = None
+        self.H = None
+        self._linear_measurements = None
+        self._tuple_idx = None
+        self._sensors = None
+        self._ranges = None
+        
+        # uniformity constant for hypergraph
+        if k > 3 and k <= self.TOSSIT_locations.shape[0]:
+            self.k = k
+        else:
+            raise ValueError(f"k must be > 3 and < {self.TOSSIT_locations.shape[0]}.")
+        
+        if min_assoc_size is not None:
+            self.min_assoc_size = min_assoc_size
+        else:
+            self.min_associ_size = self.k
+
+        # thresholds
+        self.consistency_thresh = consistency_thresh
+
+        # threshold for two location estimates to be reduced
+        self.dup_thresh = dup_thresh
+
+        self.multilat = multilat
+        self.multilat.set_map({
+            'TOSSIT_locations' : self.TOSSIT_locations,
+            'min_x' : config['scaling']['min_x'],
+            'max_x' : config['scaling']['max_x'],
+            'min_y' : config['scaling']['min_y'],
+            'max_y' : config['scaling']['max_y'],
+        })
+
+        # memoize localization
+        self.memo = dict()
+
+        self.N = N if N is not None else cpu_count()
+
+
+    def _check_consistency(self, s_comb, thresh):
+
+        edge_sets = []
+
+        # get range measurment indices associated with specified sensors in s_comb
+        ranges = [self.formatted_linear_idx[sensor_idx] for sensor_idx in s_comb]
+
+        # get all combinations of measurement indices across the sensors as List[List]
+        range_combos = map(list, itertools.product(*ranges))
+
+        # determine which candidates are consistent
+        for range_combo in range_combos:
+
+            range_subcombos = list(map(list,itertools.combinations(range_combo, self.k-1)))
+            s_subcombos = list(map(list, itertools.combinations(s_comb, self.k-1)))
+
+            append = True
+            for range_subcombo, s_subcombo in zip(range_subcombos, s_subcombos):
+
+                # get trilateration cost for candidate
+                key = (tuple(sorted(s_subcombo)), tuple(sorted(range_subcombo)))
+                if key in self.memo.keys():
+                    loc = self.memo[key]
+                else:
+                    _, loc = self.multilat.localize(self._linear_measurements[range_subcombo], s_subcombo)
+                    self.memo[key] = loc
+
+                r = (set(range_combo) - set(range_subcombo)).pop()
+                s = (set(s_comb) - set(s_subcombo)).pop()
+                if math_tools.point_circle_shortest_distance(self.TOSSIT_locations[s,:], self._linear_measurements[r], loc) > thresh:
+                    append = False
+                    break
+
+            if append:
+                edge_sets.append(range_combo)
+
+        return edge_sets
+        
+    def set_measurements(self, measurements, adaptive=False, adaptive_max=5000, threshold_delta=500):
+        """
+        Create a hypergraph which represents groups of k-consistent measurements.
+        
+        Parameters
+        ----------
+        measurements : List[array-like]
+            each sublist contains range measurements associated with a particular sensor
+        adaptive : bool
+            whether to increase the consistency threshold if no consistent measurements are found
+        adaptive_max : float
+            maximum consistency threshold to use before giving up when operating adaptively
+        threshold_delta : float
+            how much to increase the consistency threhold if no consistent groups are found when adaptive
+
+        Returns
+        -------
+        bool
+            whether associated data was found (True) or not (False)
+        """
+        
+        # update measurements
+        self.measurements = measurements
+
+        ######################################################
+        #               create formatted lists               #
+        ######################################################
+
+        # set of sensor indices with measurements
+        non_empty_sensors = set()
+        # list of all measurements traversed sensor-major
+        self._linear_measurements = []
+        # same shape as measurements but with linear indices
+        self.formatted_linear_idx = [[] for _ in range(self.TOSSIT_locations.shape[0])]
+        # measurement to linear index dict
+        measurement_to_linear_idx = {}
+        # (sensor_id, measurement_id) elements
+        self._tuple_idx = []
+        self._sensors = []
+        self._ranges = []
+        for i, m_list in enumerate(self.measurements):
+            for j, m in enumerate(m_list):
+
+                # keep track of sensors with measurements
+                non_empty_sensors.add(i)
+
+                # keep track of linear index
+                linear_idx = len(self._linear_measurements)
+                self.formatted_linear_idx[i].append(linear_idx)
+                measurement_to_linear_idx[m] = linear_idx
+
+                # keep linear list of measurements
+                self._linear_measurements.append(m)
+
+                self._tuple_idx.append((i, j))
+                self._sensors.append(i)
+                self._ranges.append(m)
+
+        # convert linear_measurements to numpy array
+        self._linear_measurements = np.asarray(self._linear_measurements)
+        self._tuple_idx = np.asarray(self._tuple_idx)
+        self._sensors = np.asarray(self._sensors)
+        self._ranges = np.asarray(self._ranges)
+
+        ######################################################
+        #                  build hypergraph                  #
+        ######################################################
+
+        adaptive_thresh = self.consistency_thresh
+        
+        # get all combinations of sensor indices
+        sensor_combs = itertools.combinations(non_empty_sensors, self.k)
+
+        # for each group of k sensors, get valid measurement combination
+        # candidates based on trilateration errors
+        scenes = {}
+        edge_set_counter = 0
+
+        with Pool(processes=100) as pool:
+            res = pool.starmap(self._check_consistency, zip(sensor_combs, np.ones((math.comb(len(non_empty_sensors), self.k),)) * adaptive_thresh))
+
+        for edge_sets in res:
+            for edge_set in edge_sets:
+                scenes[edge_set_counter] = edge_set
+                edge_set_counter += 1
+
+        # save hypergraph
+        if len(scenes):
+            self.H = hnx.Hypergraph(scenes)
+            return True
+        else:
+            return False
+
+    def reset(self):
+        """
+        Reset object between different data
+        """
+        
+        self.measurements = None
+        self.formatted_linear_idx = None
+        self.H = None
+        self._linear_measurements = None
+        self._tuple_idx = None
+        self._sensors = None
+        self._ranges = None
+        self.memo = dict()
     
     def _eliminate_dups(self, locs, assocs, thresh=2000):
         """
