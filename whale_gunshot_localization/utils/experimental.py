@@ -14,6 +14,7 @@ import pandas as pd
 import librosa
 import dask
 from dask.distributed import Client, LocalCluster
+import multiprocessing
 from multiprocessing import Pool, cpu_count
 
 import hypernetx as hnx
@@ -757,7 +758,7 @@ class ParLocalizer:
         minimum number of measurments to constitute a valid association
     """
     
-    def __init__(self, k, multilat, consistency_thresh=1000, dup_thresh=4000, N=None, TOSSIT_locations=None, min_assoc_size=None):
+    def __init__(self, k, multilat, consistency_thresh=1000, N=None, TOSSIT_locations=None, min_assoc_size=None):
         """
         Construct attributes
         
@@ -770,8 +771,6 @@ class ParLocalizer:
         consistency_thresh : float
             threshold for distance from range to location to determine which measurements groups
             are self-consistent
-        dup_thresh : float
-            threshold for two localization estimates to be reduced to the same estimate
         N : int
             number of parallel processes for set_measurements method
         TOSSIT_locations : np.ndarray
@@ -806,9 +805,6 @@ class ParLocalizer:
         # thresholds
         self.consistency_thresh = consistency_thresh
 
-        # threshold for two location estimates to be reduced
-        self.dup_thresh = dup_thresh
-
         self.multilat = multilat
         self.multilat.set_map({
             'TOSSIT_locations' : self.TOSSIT_locations,
@@ -819,12 +815,12 @@ class ParLocalizer:
         })
 
         # memoize localization
-        self.memo = dict()
+        # self.memo = dict()
 
         self.N = N if N is not None else cpu_count()
 
 
-    def _check_consistency(self, s_comb, thresh):
+    def _check_consistency(self, s_comb, thresh, memo):
 
         edge_sets = []
 
@@ -845,11 +841,11 @@ class ParLocalizer:
 
                 # get trilateration cost for candidate
                 key = (tuple(sorted(s_subcombo)), tuple(sorted(range_subcombo)))
-                if key in self.memo.keys():
-                    loc = self.memo[key]
+                if key in memo.keys():
+                    loc = memo[key]
                 else:
                     _, loc = self.multilat.localize(self._linear_measurements[range_subcombo], s_subcombo)
-                    self.memo[key] = loc
+                    memo[key] = loc
 
                 r = (set(range_combo) - set(range_subcombo)).pop()
                 s = (set(s_comb) - set(s_subcombo)).pop()
@@ -862,7 +858,7 @@ class ParLocalizer:
 
         return edge_sets
         
-    def set_measurements(self, measurements, adaptive=False, adaptive_max=5000, threshold_delta=500):
+    def set_measurements(self, measurements):
         """
         Create a hypergraph which represents groups of k-consistent measurements.
         
@@ -940,8 +936,15 @@ class ParLocalizer:
         scenes = {}
         edge_set_counter = 0
 
-        with Pool(processes=100) as pool:
-            res = pool.starmap(self._check_consistency, zip(sensor_combs, np.ones((math.comb(len(non_empty_sensors), self.k),)) * adaptive_thresh))
+        with multiprocessing.Manager() as manager:
+            memo = manager.dict()
+            with Pool(processes=self.N) as pool:
+                res = pool.starmap(self._check_consistency, 
+                                   zip(sensor_combs, 
+                                       np.ones((math.comb(len(non_empty_sensors), self.k),)) * adaptive_thresh, 
+                                       itertools.repeat(memo, len(non_empty_sensors))
+                                      )
+                                  )
 
         for edge_sets in res:
             for edge_set in edge_sets:
@@ -967,71 +970,6 @@ class ParLocalizer:
         self._tuple_idx = None
         self._sensors = None
         self._ranges = None
-        self.memo = dict()
-    
-    def _eliminate_dups(self, locs, assocs, thresh=2000):
-        """
-        Eliminate duplicate location estiamtes based on a distance threshold.
-
-        Parameters
-        ----------
-        locs : array-like
-            Matrix of locations of shape N X 2
-        assocs : List[Set]
-            Input associations
-        thresh : float
-            Distance threshold to reduce the location estimates
-
-        Returns
-        -------
-        assocs_no_dups : List[Set]
-            Reduced associations
-        locs_no_dups : array-like
-            Reduced matrix of locations of shape M X 2
-        """
-
-        assocs = np.asarray(assocs, dtype=object)
-        locs_no_dups = []
-        assocs_no_dups = []
-        while True:
-            idx = np.arange(len(locs))
-                        
-            if len(locs) == 1:
-                locs_no_dups.append(locs[0])
-                assocs_no_dups.append(assocs[0])
-                break
-            
-            if len(locs) == 0:
-                break
-
-            # remove the ith location estimate
-            sub_idx = np.delete(idx, 0, axis=0)
-
-            # get distance form ith location estimate to the rest
-            dists = np.sqrt(((locs[sub_idx] - locs[0]) ** 2).sum(axis=1))
-
-            if (dists <= thresh).sum():
-                to_del = [0] + list(sub_idx[dists <= thresh])
-                
-                new_association = set.union(*assocs[to_del])
-                
-                # get sensor indices and ranges
-                sensors = self._sensors[list(new_association)]
-                ranges = self._ranges[list(new_association)]
-                
-                _, loc = self.multilat.localize(ranges, sensors)
-                locs_no_dups.append(loc)
-                assocs_no_dups.append(new_association)
-
-                locs = np.delete(locs, to_del, axis=0)
-                assocs = np.delete(assocs, to_del, axis=0)
-            else:
-                locs_no_dups.append(locs[0])
-                assocs_no_dups.append(assocs[0])
-                locs = np.delete(locs, 0, axis=0)
-                assocs = np.delete(assocs, 0, axis=0)
-
-        return assocs_no_dups, np.asarray(locs_no_dups)
 
     def _last_step(self, locs, associations):
         """
@@ -1094,7 +1032,7 @@ class ParLocalizer:
 
         return [assoc for assoc in associations if len(assoc) >= self.min_assoc_size], np.asarray([loc for i, loc in enumerate(locs) if len(associations[i]) >= self.min_assoc_size])
 
-    def associate_and_localize(self, reduce_dups=True, last_step=True):
+    def associate_and_localize(self, last_step=True):
         """
         Using the hypergraph constructed in self.set_measurements, perform data association
         and localization.
@@ -1122,8 +1060,6 @@ class ParLocalizer:
         
         HG = hmod.precompute_attributes(self.H)
         associations = hmod.kumar(HG)
-        # if last_step:
-        #     associations = self._last_step(associations)
 
         locs = []
         for a in associations:
@@ -1136,8 +1072,6 @@ class ParLocalizer:
         
         if last_step:
             associations, locs = self._last_step(locs, associations)
-        if reduce_dups:
-            associations, locs = self._eliminate_dups(locs, associations, thresh=self.dup_thresh)
         return associations, locs
 
 #######################################################################################################################
