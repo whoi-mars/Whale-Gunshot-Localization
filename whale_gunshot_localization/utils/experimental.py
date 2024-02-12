@@ -495,7 +495,6 @@ class Localizer:
             scenes = {}
             edge_set_counter = 0
             for s_comb in sensor_combs:
-
                 # get range measurment indices associated with specified sensors in s_comb
                 ranges = [self.formatted_linear_idx[sensor_idx] for sensor_idx in s_comb]
 
@@ -814,13 +813,10 @@ class ParLocalizer:
             'max_y' : config['scaling']['max_y'],
         })
 
-        # memoize localization
-        # self.memo = dict()
-
         self.N = N if N is not None else cpu_count()
 
 
-    def _check_consistency(self, s_comb, thresh, memo):
+    def _check_consistency(self, s_comb, thresh):
 
         edge_sets = []
 
@@ -832,7 +828,6 @@ class ParLocalizer:
 
         # determine which candidates are consistent
         for range_combo in range_combos:
-
             range_subcombos = list(map(list,itertools.combinations(range_combo, self.k-1)))
             s_subcombos = list(map(list, itertools.combinations(s_comb, self.k-1)))
 
@@ -841,11 +836,11 @@ class ParLocalizer:
 
                 # get trilateration cost for candidate
                 key = (tuple(sorted(s_subcombo)), tuple(sorted(range_subcombo)))
-                if key in memo.keys():
-                    loc = memo[key]
+                if key in self.memo.keys():
+                    loc = self.memo[key]
                 else:
                     _, loc = self.multilat.localize(self._linear_measurements[range_subcombo], s_subcombo)
-                    memo[key] = loc
+                    self.memo[key] = loc
 
                 r = (set(range_combo) - set(range_subcombo)).pop()
                 s = (set(s_comb) - set(s_subcombo)).pop()
@@ -925,7 +920,6 @@ class ParLocalizer:
         ######################################################
         #                  build hypergraph                  #
         ######################################################
-
         adaptive_thresh = self.consistency_thresh
         
         # get all combinations of sensor indices
@@ -935,16 +929,14 @@ class ParLocalizer:
         # candidates based on trilateration errors
         scenes = {}
         edge_set_counter = 0
-
-        with multiprocessing.Manager() as manager:
-            memo = manager.dict()
-            with Pool(processes=self.N) as pool:
-                res = pool.starmap(self._check_consistency, 
-                                   zip(sensor_combs, 
-                                       np.ones((math.comb(len(non_empty_sensors), self.k),)) * adaptive_thresh, 
-                                       itertools.repeat(memo, len(non_empty_sensors))
-                                      )
-                                  )
+        # with multiprocessing.Manager() as manager:
+        self.memo = dict()
+        with Pool(processes=self.N) as pool:
+            res = pool.starmap(self._check_consistency, 
+                                zip(sensor_combs, 
+                                    np.ones((math.comb(len(non_empty_sensors), self.k),)) * adaptive_thresh,
+                                   )
+                              )
 
         for edge_sets in res:
             for edge_set in edge_sets:
@@ -970,6 +962,7 @@ class ParLocalizer:
         self._tuple_idx = None
         self._sensors = None
         self._ranges = None
+        self.memo = dict()
 
     def _last_step(self, locs, associations):
         """
