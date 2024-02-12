@@ -172,6 +172,7 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
         localizer_params_final['consistency_thresh'] = localizer_params_final['consistency_thresh'][std]
         localizer_params_final['multilat'] = localizer_params_final['multilat'][std]
         localizer_params_final['min_assoc_size'] = localizer_params_final['min_assoc_size'][std]
+        localizer_params_final['k'] = localizer_params_final['k'][std]
         
         for num_sources in num_sources_list:
 
@@ -263,7 +264,7 @@ if __name__ == "__main__":
     if args.simulate:
 
         # dask setup
-        cluster = LocalCluster(n_workers=100, processes=True)
+        cluster = LocalCluster(n_workers=128, processes=True)
         client = Client(cluster)
 
         # set random seed
@@ -279,9 +280,9 @@ if __name__ == "__main__":
         TOSSIT_locations = np.asarray([-ys, xs]).T
 
         # parameters for localizer and data_generator
-        localizer_params = dict(k=4, 
+        localizer_params = dict(k={0: 4, 15: 4, 30: 4, 750: 5}, 
                                 multilat={i : MultilaterationOpt(method_thresh=float('inf'), rng=rng1) for i in [0, 15, 30, 750]}, 
-                                consistency_thresh={0: 2, 15: 30, 30: 75, 750: 1200}, 
+                                consistency_thresh={0: 2, 15: 30, 30: 75, 750: 500}, 
                                 dup_thresh=1000, 
                                 prune=False,
                                 TOSSIT_locations=TOSSIT_locations,
@@ -359,8 +360,8 @@ if __name__ == "__main__":
                            'best_loc_error': best_location_error_list,
                            'std': std_list,})
 
-    df_loc_high = df_loc[df_loc["std"] >= 500]
-    df_loc_low = df_loc[df_loc["std"] < 500]
+    df_loc_high = df_loc[df_loc["std"] >= 100]
+    df_loc_low = df_loc[df_loc["std"] < 100]
 
     # location stats
     def perc90(iterable):
@@ -385,7 +386,7 @@ if __name__ == "__main__":
     axs[0].set_title("Unsupervised Localization Error")
     axs[0].set_xlabel("Number of Sources")
     axs[0].set_ylabel("Error [m]")
-    axs[0].set_ylim([-5, 200])
+    axs[0].set_ylim([-5, 100])
     axs[0].set_axisbelow(True)
 
     sns.boxplot(x=df_loc_low['num_sources'], 
@@ -400,7 +401,7 @@ if __name__ == "__main__":
     axs[1].set_title("Ideal Localization Error")
     axs[1].set_xlabel("Number of Sources")
     axs[1].set_ylabel("Error [m]")
-    axs[1].set_ylim([-5, 200])
+    axs[1].set_ylim([-5, 100])
     axs[1].set_axisbelow(True)
 
     sns.boxplot(x=df_loc_high['num_sources'], 
@@ -415,7 +416,7 @@ if __name__ == "__main__":
     axs[2].set_title("Unsupervised Localization Error")
     axs[2].set_xlabel("Number of Sources")
     axs[2].set_ylabel("Error [m]")
-    axs[2].set_ylim([-5, 8000])
+    axs[2].set_ylim([-5, 5000])
     axs[2].set_axisbelow(True)
 
     sns.boxplot(x=df_loc_high['num_sources'], 
@@ -430,7 +431,7 @@ if __name__ == "__main__":
     axs[3].set_title("Ideal Localization Error")
     axs[3].set_xlabel("Number of Sources")
     axs[3].set_ylabel("Error [m]")
-    axs[3].set_ylim([-5, 8000])
+    axs[3].set_ylim([-5, 5000])
     axs[3].set_axisbelow(True)
 
     #---------------------------------------------------#
