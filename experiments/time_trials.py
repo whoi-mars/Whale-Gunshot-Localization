@@ -37,12 +37,12 @@ def get_time(n_measurements, T):
                                                                                                 TOSSIT_locations=T,
                                                                                                 var=30)
     
-    L = ParLocalizer(k=4, multilat=MultilaterationOpt(method_thresh=float('inf')), consistency_thresh=75, TOSSIT_locations=T, min_assoc_size=4)
+    L = ParLocalizer(k=4, multilat=MultilaterationOpt(method_thresh=float('inf')), consistency_thresh=75, TOSSIT_locations=T, min_assoc_size=6)
 
     result_sm = timeit.timeit("L.set_measurements(measurements)", number=1, globals=locals())
-    # result_al = timeit.timeit("L.associate_and_localize(last_step=True)", number=1, globals=locals())
+    result_al = timeit.timeit("L.associate_and_localize(last_step=True)", number=1, globals=locals())
 
-    return result_sm, None #result_al
+    return result_sm, result_al
 
 if __name__ == "__main__":
     
@@ -59,10 +59,11 @@ if __name__ == "__main__":
         TOSSIT_locations = np.asarray([-ys, xs]).T
 
         sm_times, al_times = [], []
-        n_measurements_list = (17, 85)
+        n_measurements_list = (17, 52, 17)
         for i in tqdm(range(*n_measurements_list), disable=args.background):
-            if i % 10 == 0:
-                print(i)
+            if args.background:
+                if i % 10 == 0:
+                    print(i)
             result_sm, result_al = get_time(i, TOSSIT_locations)
             sm_times.append(result_sm)
             al_times.append(result_al)
@@ -81,17 +82,21 @@ if __name__ == "__main__":
     df = pd.read_csv(os.path.join(path, "time_trials.csv"))
 
     # matlab settings
-    matplotlib.rcParams.update({'font.size': 14})
+    matplotlib.rcParams.update({'font.size': 12})
 
     # get figs and axes
     num_figs = 1
     figs = [plt.figure() for _ in range(num_figs)]
     axs = [fig.gca() for fig in figs]
 
-    axs[0].plot(df["n_measurements"], df["time_sm"])
-    # axs[0].set_yscale("log")
+    axs[0].plot(df["n_measurements"], df["time_sm"], label="Construct Hypergraph")
+    axs[0].plot(df["n_measurements"], df["time_al"], label="Associate/Localize")
+    axs[0].plot(df["n_measurements"], df["time_sm"] + df["time_al"], label="Total")
+    axs[0].set_yscale("log")
     axs[0].set_xlabel("Number of Measurements")
     axs[0].set_ylabel("Time [s]")
+    axs[0].set_ylim([0.1, 100])
+    axs[0].legend()
     
     for ax in axs:
         ax.grid()
