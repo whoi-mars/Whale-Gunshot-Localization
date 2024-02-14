@@ -31,6 +31,8 @@ parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
 args = parser.parse_args()
 
+seed = 1524
+
 # suppress warnings
 if args.suppress_warnings:
     import warnings
@@ -182,11 +184,14 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
             source_associations_list = []
             TOSSIT_associations_list = []
             source_locs_list = []
+
+            rng = np.random.default_rng(seed)
             for i in range(n):
                 while True:
-                    measurements, source_associations, TOSSIT_associations, source_locs = sim_datagen.generate_measurements(num_sources=num_sources, var=std ** 2, **data_gen_params)
-                    if np.concatenate(measurements).max() <= config['scaling']['max_r'] \
-                       and math_tools.is_sparse_locs(source_locs, thresh=sparse_distance):
+                    measurements, source_associations, TOSSIT_associations, source_locs = sim_datagen.generate_measurements(num_sources=num_sources, var=std ** 2, rng=rng, **data_gen_params)
+                    # if np.concatenate(measurements).max() <= config['scaling']['max_r'] \
+                    #    and math_tools.is_sparse_locs(source_locs, thresh=sparse_distance):
+                    if math_tools.is_sparse_locs(source_locs, thresh=sparse_distance):
                         break
                 measurements_list.append(measurements)
                 source_associations_list.append(source_associations)
@@ -267,12 +272,6 @@ if __name__ == "__main__":
         cluster = LocalCluster(n_workers=128, processes=True)
         client = Client(cluster)
 
-        # set random seed
-        # make two of these for monte carlo and localizer and make an internal one for monte
-        # carlo which does either the source locations or variance
-        rng1 = np.random.default_rng(1524)
-        rng2 = np.random.default_rng(1524)
-
         # derive TOSSIT locations relative to the first from the lat/lons
         TOSSIT_latlons = np.asarray([config['TOSSIT']['TOSSIT_lat'], config['TOSSIT']['TOSSIT_lon']]).T
         pargs = proj.Proj(proj="aeqd", lat_0=TOSSIT_latlons[0, 0], lon_0=TOSSIT_latlons[0, 1], datum="WGS84", units="m")
@@ -280,8 +279,8 @@ if __name__ == "__main__":
         TOSSIT_locations = np.asarray([-ys, xs]).T
 
         # parameters for localizer and data_generator
-        localizer_params = dict(k={0: 4, 15: 4, 30: 4, 750: 5}, 
-                                multilat={i : MultilaterationOpt(method_thresh=float('inf'), rng=rng1) for i in [0, 15, 30, 750]}, 
+        localizer_params = dict(k={0: 4, 15: 4, 30: 4, 750: 4}, 
+                                multilat={i : MultilaterationOpt(method_thresh=float('inf'), seed=seed) for i in [0, 15, 30, 750]}, 
                                 consistency_thresh={0: 2, 15: 30, 30: 75, 750: 500}, 
                                 dup_thresh=1000, 
                                 prune=False,
@@ -291,7 +290,6 @@ if __name__ == "__main__":
                                       adaptive_max=5000, 
                                       threshold_delta=500)
         data_gen_params = dict(num_delete=0, 
-                               rng=rng2, 
                                in_sensors=True,
                                TOSSIT_locations=TOSSIT_locations)
 
@@ -386,7 +384,7 @@ if __name__ == "__main__":
     axs[0].set_title("Unsupervised Localization Error")
     axs[0].set_xlabel("Number of Sources")
     axs[0].set_ylabel("Error [m]")
-    axs[0].set_ylim([-5, 100])
+    axs[0].set_ylim([-5, 110])
     axs[0].set_axisbelow(True)
 
     sns.boxplot(x=df_loc_low['num_sources'], 
@@ -401,7 +399,7 @@ if __name__ == "__main__":
     axs[1].set_title("Ideal Localization Error")
     axs[1].set_xlabel("Number of Sources")
     axs[1].set_ylabel("Error [m]")
-    axs[1].set_ylim([-5, 100])
+    axs[1].set_ylim([-5, 110])
     axs[1].set_axisbelow(True)
 
     sns.boxplot(x=df_loc_high['num_sources'], 
