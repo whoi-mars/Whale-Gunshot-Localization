@@ -3,6 +3,7 @@ import glob
 import itertools
 import warnings
 import math
+import time
 
 from bs4 import BeautifulSoup
 import numpy as np
@@ -19,10 +20,11 @@ from multiprocessing import Pool, cpu_count
 
 import hypernetx as hnx
 import hypernetx.algorithms.hypergraph_modularity as hmod
-import networkx as nx 
 
 from whale_gunshot_localization.utils.transformations import to_spect, get_image_transform_range_classify
 import whale_gunshot_localization.utils.math_tools as math_tools
+# from whale_gunshot_localization.utils.myhypernetx.hypernetx.algorithms.hypergraph_modularity import kumar as my_kumar
+# from whale_gunshot_localization.utils.myhypernetx.hypernetx.algorithms.hypergraph_modularity import parmar
 
 # load config file
 from whale_gunshot_localization import config
@@ -94,7 +96,7 @@ class MultilaterationOpt(MultilaterationBase):
         is sufficient and determines whether to use closed-form or gradient-based localization approch
     """
 
-    def __init__(self, method_thresh=0.95, rng=None):
+    def __init__(self, method_thresh=0.95, seed=None):
         """
         Construct attributes.
 
@@ -111,7 +113,7 @@ class MultilaterationOpt(MultilaterationBase):
         self.method_thresh = method_thresh
 
         # rng
-        self.rng = rng if rng is not None else np.random.default_rng(np.random.randint(1,1000))
+        self.rng = np.random.default_rng(seed) if seed is not None else np.random.default_rng(np.random.randint(1,1000))
     
     def _opt(self, ranges, sensors_idx):
         """
@@ -1051,6 +1053,7 @@ class ParLocalizer:
         # make sure we've set measurements
         assert self.measurements is not None, "measurements have not been set"
         
+
         HG = hmod.precompute_attributes(self.H)
         associations = hmod.kumar(HG)
 
