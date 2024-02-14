@@ -1,6 +1,26 @@
 import numpy as np
+import geopandas as gpd
+import pandas as pd
+from shapely.geometry import MultiPoint, Point, Polygon
 
 from whale_gunshot_localization import config
+
+class PointsInPoly:
+
+    def __init__(self, TOSSIT_locations, rng):
+        TOSSIT_locations = np.asarray([TOSSIT_locations[:,1], -TOSSIT_locations[:,0]]).T
+        mpt = MultiPoint(TOSSIT_locations)
+        self.polygon = Polygon(mpt.convex_hull)
+        self.rng = rng
+
+    def generate(self, n):
+        minx, miny, maxx, maxy = self.polygon.bounds
+        points = []
+        while len(points) < n:
+            pnt = Point(self.rng.uniform(minx, maxx), self.rng.uniform(miny, maxy))
+            if self.polygon.contains(pnt):
+                points.append([-pnt.xy[1][0], pnt.xy[0][0]])
+        return np.asarray(points)
 
 def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=False, TOSSIT_locations=None):
     """
@@ -34,26 +54,24 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
     source_locs : array-like[array-like]
         matrix of generated source locations
     """ 
-    
+
     # check inputs
     assert num_sources > 0, "number of sources must be non-negative"
     assert num_delete >= 0, "max signals to delete at each sensor must be non-negative"
     
     # get TOSSIT locations and extreme coordinate values
     TOSSIT_locations = TOSSIT_locations if TOSSIT_locations is not None else np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-    if in_sensors:
-        min_x = np.min(TOSSIT_locations[:,1])
-        max_x = np.max(TOSSIT_locations[:,1])
-        min_y = np.min(TOSSIT_locations[:,0])
-        max_y = np.max(TOSSIT_locations[:,0])
-    else:
-        min_x = config['scaling']['min_x']
-        max_x = config['scaling']['max_x']
-        min_y = config['scaling']['min_y']
-        max_y = config['scaling']['max_y']
+    min_x = config['scaling']['min_x']
+    max_x = config['scaling']['max_x']
+    min_y = config['scaling']['min_y']
+    max_y = config['scaling']['max_y']
     
     # choose number of sources and generate source locations
-    source_locs = np.concatenate((rng.uniform(min_y, max_y, size=(num_sources,1)), rng.uniform(min_x, max_x, size=(num_sources,1))), axis=1)
+    if in_sensors:
+        G = PointsInPoly(TOSSIT_locations, rng)
+        source_locs = G.generate(num_sources)
+    else:
+        source_locs = np.concatenate((rng.uniform(min_y, max_y, size=(num_sources,1)), rng.uniform(min_x, max_x, size=(num_sources,1))), axis=1)
     
     # generate range measurements and log associations
     range_measurements, TOSSIT_associations, del_list, source_associations = [], [], [], []
