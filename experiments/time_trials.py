@@ -18,10 +18,10 @@ from whale_gunshot_localization import config, PROJECT_ROOT_DIR
 parser = argparse.ArgumentParser(description="Run Monte Carlo simulations for data association/localization algorithm")
 parser.add_argument('--simulate', action='store_true',
                     help="simulate rather than use previous results if available (default: false)")
-# parser.add_argument('--save_figs', action='store_true',
-#                     help="save figures (default: false)")
-# parser.add_argument('--suppress_warnings', action='store_true',
-#                     help="tell Python to suppress warnings")
+parser.add_argument('--save_figs', action='store_true',
+                    help="save figures (default: false)")
+parser.add_argument('--suppress_warnings', action='store_true',
+                    help="tell Python to suppress warnings")
 parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
 args = parser.parse_args()
@@ -37,7 +37,7 @@ def get_time(n_measurements, T):
                                                                                                 TOSSIT_locations=T,
                                                                                                 var=30)
     
-    L = ParLocalizer(k=4, multilat=MultilaterationOpt(method_thresh=float('inf')), consistency_thresh=75, TOSSIT_locations=T, min_assoc_size=6)
+    L = ParLocalizer(k=5, multilat=MultilaterationOpt(method_thresh=float('inf')), consistency_thresh=75, TOSSIT_locations=T, min_assoc_size=6)
 
     result_sm = timeit.timeit("L.set_measurements(measurements)", number=1, globals=locals())
     result_al = timeit.timeit("L.associate_and_localize(last_step=True)", number=1, globals=locals())
@@ -59,7 +59,7 @@ if __name__ == "__main__":
         TOSSIT_locations = np.asarray([-ys, xs]).T
 
         sm_times, al_times = [], []
-        n_measurements_list = (17, 52, 17)
+        n_measurements_list = (51, 52)
         for i in tqdm(range(*n_measurements_list), disable=args.background):
             if args.background:
                 if i % 10 == 0:
@@ -101,5 +101,6 @@ if __name__ == "__main__":
     for ax in axs:
         ax.grid()
 
-    fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments","results", "time_trials")
-    figs[0].savefig(os.path.join(fig_path, "time_trials.png"))
+    if args.save_figs:
+        fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments","results", "time_trials")
+        figs[0].savefig(os.path.join(fig_path, "time_trials.png"))
