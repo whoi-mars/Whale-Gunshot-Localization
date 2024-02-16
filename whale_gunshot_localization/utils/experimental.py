@@ -818,10 +818,9 @@ class ParLocalizer:
         self.N = N if N is not None else cpu_count()
 
 
-    def _check_consistency(self, s_comb, thresh):
+    def _check_consistency(self, s_comb):
 
         edge_sets = []
-
         # get range measurment indices associated with specified sensors in s_comb
         ranges = [self.formatted_linear_idx[sensor_idx] for sensor_idx in s_comb]
 
@@ -846,7 +845,7 @@ class ParLocalizer:
 
                 r = (set(range_combo) - set(range_subcombo)).pop()
                 s = (set(s_comb) - set(s_subcombo)).pop()
-                if math_tools.point_circle_shortest_distance(self.TOSSIT_locations[s,:], self._linear_measurements[r], loc) > thresh:
+                if math_tools.point_circle_shortest_distance(self.TOSSIT_locations[s,:], self._linear_measurements[r], loc) > self.consistency_thresh:
                     append = False
                     break
 
@@ -922,7 +921,7 @@ class ParLocalizer:
         ######################################################
         #                  build hypergraph                  #
         ######################################################
-        adaptive_thresh = self.consistency_thresh
+        # adaptive_thresh = self.consistency_thresh
         
         # get all combinations of sensor indices
         sensor_combs = itertools.combinations(non_empty_sensors, self.k)
@@ -934,11 +933,7 @@ class ParLocalizer:
         # with multiprocessing.Manager() as manager:
         self.memo = dict()
         with Pool(processes=self.N) as pool:
-            res = pool.starmap(self._check_consistency, 
-                                zip(sensor_combs, 
-                                    np.ones((math.comb(len(non_empty_sensors), self.k),)) * adaptive_thresh,
-                                   )
-                              )
+            res = pool.map(self._check_consistency, sensor_combs)
 
         for edge_sets in res:
             for edge_set in edge_sets:
@@ -951,6 +946,103 @@ class ParLocalizer:
             return True
         else:
             return False
+
+    def adaptive_localize(self, measurements):
+        """
+        Create a hypergraph which represents groups of k-consistent measurements.
+        
+        Parameters
+        ----------
+        measurements : List[array-like]
+            each sublist contains range measurements associated with a particular sensor
+        adaptive : bool
+            whether to increase the consistency threshold if no consistent measurements are found
+        adaptive_max : float
+            maximum consistency threshold to use before giving up when operating adaptively
+        threshold_delta : float
+            how much to increase the consistency threhold if no consistent groups are found when adaptive
+
+        Returns
+        -------
+        bool
+            whether associated data was found (True) or not (False)
+        """
+        while True:
+            # update measurements
+            self.measurements = measurements
+
+        ######################################################
+        #               create formatted lists               #
+        ######################################################
+            # set of sensor indices with measurements
+            non_empty_sensors = set()
+            # list of all measurements traversed sensor-major
+            self._linear_measurements = []
+            # same shape as measurements but with linear indices
+            self.formatted_linear_idx = [[] for _ in range(self.TOSSIT_locations.shape[0])]
+            # measurement to linear index dict
+            measurement_to_linear_idx = {}
+            # (sensor_id, measurement_id) elements
+            self._tuple_idx = []
+            self._sensors = []
+            self._ranges = []
+            for i, m_list in enumerate(self.measurements):
+                for j, m in enumerate(m_list):
+
+                    # keep track of sensors with measurements
+                    non_empty_sensors.add(i)
+
+                    # keep track of linear index
+                    linear_idx = len(self._linear_measurements)
+                    self.formatted_linear_idx[i].append(linear_idx)
+                    measurement_to_linear_idx[m] = linear_idx
+
+                    # keep linear list of measurements
+                    self._linear_measurements.append(m)
+
+                    self._tuple_idx.append((i, j))
+                    self._sensors.append(i)
+                    self._ranges.append(m)
+
+            # convert linear_measurements to numpy array
+            self._linear_measurements = np.asarray(self._linear_measurements)
+            self._tuple_idx = np.asarray(self._tuple_idx)
+            self._sensors = np.asarray(self._sensors)
+            self._ranges = np.asarray(self._ranges)
+
+            ######################################################
+            #                  build hypergraph                  #
+            ######################################################
+            
+            sensor_combs = list(map(list, itertools.combinations(non_empty_sensors, self.k)))
+
+            # for each group of k sensors, get valid measurement combination
+            # candidates based on trilateration errors
+            scenes = {}
+            edge_set_counter = 0
+            self.memo = dict()
+            with Pool(processes=self.N) as pool:
+                res = pool.map(self._check_consistency, sensor_combs)
+
+            for edge_sets in res:
+                for edge_set in edge_sets:
+                    scenes[edge_set_counter] = edge_set
+                    edge_set_counter += 1
+
+            # save hypergraph
+            if len(scenes):
+                self.H = hnx.Hypergraph(scenes)
+                assocs, locs = self.associate_and_localize(last_step=True)
+
+                if len(locs) == 0:
+                    self.consistency_thresh += 100
+                    self.reset()
+                    continue
+
+                return assocs, locs
+            else:
+                return None, None
+
 
     def reset(self):
         """
