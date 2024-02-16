@@ -96,7 +96,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data
         group = np.where(assoc_flat == p)[0]
         if len(group) >= localizer_params["min_assoc_size"]:
             possible_associations.append(p)
-    possible = len(possible_associations) > 0
+    possible = (len(possible_associations) > 0)
 
     # instantiate localizer
     L = Localizer(**localizer_params)
