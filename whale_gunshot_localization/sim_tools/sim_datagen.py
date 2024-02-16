@@ -6,14 +6,52 @@ from shapely.geometry import MultiPoint, Point, Polygon
 from whale_gunshot_localization import config
 
 class PointsInPoly:
+    """
+    Generate random points within the convex hull of 
+    a network of sensors via rejection sampling.
+
+    ...
+
+    Attributes
+    ----------
+    polygon : shapely.geometry.Polygon
+        polygon object
+    rng : np.random.default_rng
+        random generator object
+    """
 
     def __init__(self, TOSSIT_locations, rng):
+        """
+        Construct attributes.
+
+        Parameters
+        ----------
+        TOSSIT_locations : np.ndarray
+            sensor coorindinates
+        rng : np.random.default_rng
+            random generator object
+        """
+        
         TOSSIT_locations = np.asarray([TOSSIT_locations[:,1], -TOSSIT_locations[:,0]]).T
         mpt = MultiPoint(TOSSIT_locations)
         self.polygon = Polygon(mpt.convex_hull)
         self.rng = rng
 
     def generate(self, n):
+        """
+        Generate random points in polygon
+
+        Parameters
+        ----------
+        n : int
+            number of points to generate
+
+        Returns
+        -------
+          : np.ndarray
+            randomly generated points
+        """
+
         minx, miny, maxx, maxy = self.polygon.bounds
         points = []
         while len(points) < n:
@@ -61,16 +99,16 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
     
     # get TOSSIT locations and extreme coordinate values
     TOSSIT_locations = TOSSIT_locations if TOSSIT_locations is not None else np.asarray([config['TOSSIT']['TOSSIT_y'], config['TOSSIT']['TOSSIT_x']]).T
-    min_x = config['scaling']['min_x']
-    max_x = config['scaling']['max_x']
-    min_y = config['scaling']['min_y']
-    max_y = config['scaling']['max_y']
     
     # choose number of sources and generate source locations
     if in_sensors:
         G = PointsInPoly(TOSSIT_locations, rng)
         source_locs = G.generate(num_sources)
     else:
+        min_x = config['scaling']['min_x']
+        max_x = config['scaling']['max_x']
+        min_y = config['scaling']['min_y']
+        max_y = config['scaling']['max_y']
         source_locs = np.concatenate((rng.uniform(min_y, max_y, size=(num_sources,1)), rng.uniform(min_x, max_x, size=(num_sources,1))), axis=1)
     
     # generate range measurements and log associations
