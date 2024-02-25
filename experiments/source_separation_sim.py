@@ -31,7 +31,7 @@ parser.add_argument('--background', '-b', action='store_true',
                     help='silence the progress bar')
 args = parser.parse_args()
 
-seed = 1524
+seed = 1234 # 1524
 
 # suppress warnings
 if args.suppress_warnings:
@@ -132,7 +132,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data
     source_loc_idx_combs = np.asarray(list(map(list, itertools.permutations(np.arange(s_locs.shape[0])))))
     errors_matrix = np.sqrt(((source_loc_combs[:,:num_ests,:] - locs_est[np.newaxis,:,:]) ** 2).sum(axis=2)).sum(axis=1)
     res = np.sqrt(((source_loc_combs[np.argmin(errors_matrix),:num_ests,:] - locs_est[np.newaxis,:,:]) ** 2).sum(axis=2)).flatten()
-    results["localization_error"] = res
+    results["localization_error"] = np.asarray([res.mean()])
 
     # calculate best possible localization errors with correct associations
     detected_sources = source_loc_idx_combs[np.argmin(errors_matrix)][:num_ests]
@@ -154,7 +154,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data
         best_locs.append(loc)
     best_locs = np.asarray(best_locs)
     best_res = np.sqrt(((best_locs - s_locs[detected_sources]) ** 2).sum(axis=1))
-    results['best_localization_error'] = best_res
+    results['best_localization_error'] = np.asarray([best_res.mean()])
 
     # calculate percentage of possible sources localized
     percent_possible_detections = len(assocs_est) / len(possible_associations)
@@ -189,8 +189,6 @@ def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_pa
             for i in range(n):
                 while True:
                     measurements, source_associations, TOSSIT_associations, source_locs = sim_datagen.generate_measurements(num_sources=num_sources, var=std ** 2, rng=rng, **data_gen_params)
-                    # if np.concatenate(measurements).max() <= config['scaling']['max_r'] \
-                    #    and math_tools.is_sparse_locs(source_locs, thresh=sparse_distance):
                     if math_tools.is_sparse_locs(source_locs, thresh=sparse_distance):
                         break
                 measurements_list.append(measurements)
@@ -279,13 +277,13 @@ if __name__ == "__main__":
         TOSSIT_locations = np.asarray([-ys, xs]).T
 
         # parameters for localizer and data_generator
-        localizer_params = dict(k={0: 4, 15: 4, 30: 4, 750: 4}, 
-                                multilat={i : MultilaterationOpt(method_thresh=float('inf'), seed=seed) for i in [0, 15, 30, 750]}, 
-                                consistency_thresh={0: 2, 15: 30, 30: 75, 750: 500}, 
+        localizer_params = dict(k={0: 4, 15: 4, 30: 4, 660: 4, 750: 4}, 
+                                multilat={i : MultilaterationOpt(method_thresh=float('inf'), seed=seed) for i in [0, 15, 30, 660, 750]}, 
+                                consistency_thresh={0: 2, 15: 30, 30: 75, 660: 500, 750: 500}, 
                                 dup_thresh=1000, 
                                 prune=False,
                                 TOSSIT_locations=TOSSIT_locations,
-                                min_assoc_size={0: 9, 15: 9, 30: 9, 750: 9})
+                                min_assoc_size={0: 9, 15: 9, 30: 9, 660: 9, 750: 9})
         set_measurement_params = dict(adaptive=False, 
                                       adaptive_max=5000, 
                                       threshold_delta=500)
@@ -295,8 +293,8 @@ if __name__ == "__main__":
 
         # run MC
         df = run_monte_carlo(n=100,
-                             std_list=[0, 15, 30, 750],
-                             num_sources_list=range(1,4),
+                             std_list=[660], #[0, 15, 30, 660],
+                             num_sources_list=range(1,5),
                              sparse_distance=2000,
                              localizer_params=localizer_params,
                              set_measurement_params=set_measurement_params,
@@ -317,11 +315,6 @@ if __name__ == "__main__":
     std_list_all = sorted(list(set(df['std'])))
     num_sources_max = df['num_sources'].max()
     num_sources_min = df['num_sources'].min()
-
-    # get figs and axes
-    num_figs = 4
-    figs = [plt.figure() for _ in range(num_figs)]
-    axs = [fig.gca() for fig in figs]
 
     # make variance integer if possible
     def intify(x):
@@ -357,9 +350,17 @@ if __name__ == "__main__":
                            'loc_error': location_error_list,
                            'best_loc_error': best_location_error_list,
                            'std': std_list,})
-
+    
+    df_fcp = pd.DataFrame({'num_sources': np.concatenate((num_sources_list, num_sources_list)),
+                           'loc_error': np.concatenate((location_error_list, best_location_error_list)),
+                           'std': np.concatenate((std_list, std_list)),
+                           'type': np.concatenate((['Automatic' for _ in range(len(std_list))],['Manual' for _ in range(len(std_list))])),})
+    
     df_loc_high = df_loc[df_loc["std"] >= 100]
     df_loc_low = df_loc[df_loc["std"] < 100]
+    df_loc_low_fcp = df_fcp[df_fcp["std"] < 100]
+    df_loc_high_fcp = df_fcp[df_fcp["std"] >= 100]
+
 
     # location stats
     def perc90(iterable):
@@ -372,71 +373,97 @@ if __name__ == "__main__":
         return np.percentile(a, 10)
     loc_cols = df_loc.groupby(by=['std', 'num_sources']).agg({'loc_error': ['mean', 'std', perc90], 'best_loc_error': ['mean', 'std', perc90]})
 
-    sns.boxplot(x=df_loc_low['num_sources'], 
-                y=df_loc_low['loc_error'], 
-                hue=[intify(x) for x in df_loc_low['std']], 
-                showfliers=1,
-                showmeans=True,
-                linewidth=1,
-                meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
-                ax=axs[0])
-    axs[0].legend(title='Standard Deviation [m]')
-    axs[0].set_title("Unsupervised Localization Error")
-    axs[0].set_xlabel("Number of Sources")
-    axs[0].set_ylabel("Error [m]")
-    axs[0].set_ylim([-5, 110])
-    axs[0].set_axisbelow(True)
+    # get figs and axes
+    num_figs = 0
+    num_subplots = 2
+    figs = [plt.figure() for _ in range(num_figs)]
+    axs = [fig.gca() for fig in figs]
+    for _ in range(num_subplots):
+        fig, a = plt.subplots(1, num_sources_max, figsize=(15,10), sharey=True)
+        figs.append(fig)
+        axs.append(a)
 
-    sns.boxplot(x=df_loc_low['num_sources'], 
-                y=df_loc_low['best_loc_error'], 
-                hue=[intify(x) for x in df_loc_low['std']], 
-                showfliers=1,
-                showmeans=True,
-                linewidth=1,
-                meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
-                ax=axs[1])
-    axs[1].legend(title='Standard Deviation [m]')
-    axs[1].set_title("Ideal Localization Error")
-    axs[1].set_xlabel("Number of Sources")
-    axs[1].set_ylabel("Error [m]")
-    axs[1].set_ylim([-5, 110])
-    axs[1].set_axisbelow(True)
+    #########################
+    #     Low Noise MC      #
+    #########################
 
-    sns.boxplot(x=df_loc_high['num_sources'], 
-                y=df_loc_high['loc_error'], 
-                hue=[intify(x) for x in df_loc_high['std']], 
-                showfliers=1,
-                showmeans=True,
-                linewidth=1,
-                meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
-                ax=axs[2])
-    axs[2].legend(title='Standard Deviation [m]')
-    axs[2].set_title("Unsupervised Localization Error")
-    axs[2].set_xlabel("Number of Sources")
-    axs[2].set_ylabel("Error [m]")
-    axs[2].set_ylim([-5, 5000])
-    axs[2].set_axisbelow(True)
+    spax = axs[0]
+    figs[0].subplots_adjust(wspace=0)
+    ns = 1
+    for i in range(num_sources_max):
+        dft = df_loc_low_fcp[df_loc_low_fcp['num_sources'] == ns]
+        b = sns.boxplot(x=dft['type'], 
+                    y=dft['loc_error'], 
+                    hue=dft['std'], 
+                    showfliers=1,
+                    showmeans=True,
+                    linewidth=1,
+                    meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                    ax=spax[i])
 
-    sns.boxplot(x=df_loc_high['num_sources'], 
-                y=df_loc_high['best_loc_error'], 
-                hue=[intify(x) for x in df_loc_high['std']], 
-                showfliers=1,
-                showmeans=True,
-                linewidth=1,
-                meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
-                ax=axs[3])
-    axs[3].legend(title='Standard Deviation [m]')
-    axs[3].set_title("Ideal Localization Error")
-    axs[3].set_xlabel("Number of Sources")
-    axs[3].set_ylabel("Error [m]")
-    axs[3].set_ylim([-5, 5000])
-    axs[3].set_axisbelow(True)
+        # LEGEND
+        if i < num_sources_max - 1:
+            spax[i].legend([],[], frameon=False)
+        
+        # LABELS
+        if ns > 1:
+            spax[i].set_ylabel("")
+        else:
+            spax[i].set_ylabel("Localization Error [m]")
+        spax[i].set_xlabel(f"{ns}")
+        b.tick_params(labelsize=14)
+
+        ns += 1
+
+    h, l = spax[i].get_legend_handles_labels()
+    spax[-1].legend(h,["$\sigma_{r}$ = " + f"{lab} m" for lab in l])
+    figs[0].text(0.5, 0.02, 'Number of Sources', ha='center')
+
+    #########################
+    #     High Noise MC     #
+    #########################
+
+    spax = axs[1]
+    figs[1].subplots_adjust(wspace=0)
+    ns = 1
+    for i in range(num_sources_max):
+        dft = df_loc_high_fcp[df_loc_high_fcp['num_sources'] == ns]
+        b = sns.boxplot(x=dft['type'], 
+                    y=dft['loc_error'], 
+                    hue=dft['std'], 
+                    showfliers=1,
+                    showmeans=True,
+                    linewidth=1,
+                    meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                    ax=spax[i])
+
+        # LEGEND
+        if i < num_sources_max - 1:
+            spax[i].legend([],[], frameon=False)
+        
+        # LABELS
+        if ns > 1:
+            spax[i].set_ylabel("")
+        else:
+            spax[i].set_ylabel("Localization Error [m]")
+        spax[i].set_xlabel(f"{ns}")
+        b.tick_params(labelsize=14)
+
+        ns += 1
+
+    h, l = spax[i].get_legend_handles_labels()
+    spax[-1].legend(h,["$\sigma_{r}$ = " + f"{lab} m" for lab in l])
+    figs[1].text(0.5, 0.02, 'Number of Sources', ha='center')
 
     #---------------------------------------------------#
     #------------ finalize plot/data and save ----------#
     #---------------------------------------------------#
 
     for ax in axs:
+        if isinstance(ax, np.ndarray):
+            for a in ax:
+                a.grid()
+            continue
         ax.grid()
 
     dff = df.groupby(by=['std', 'num_sources']).agg({'over_predict_sources': ['mean'],
@@ -446,10 +473,8 @@ if __name__ == "__main__":
 
     if args.save_figs:
         fig_path = os.path.join(PROJECT_ROOT_DIR, "experiments","results", "data_assoc_and_loc")
-        figs[0].savefig(os.path.join(fig_path, "unsupervised_location_error_low.png"))
-        figs[1].savefig(os.path.join(fig_path, "best_location_error_low.png"))
-        figs[2].savefig(os.path.join(fig_path, "unsupervised_location_error_high.png"))
-        figs[3].savefig(os.path.join(fig_path, "best_location_error_high.png"))
+        figs[0].savefig(os.path.join(fig_path, "low_noise_mc.png"))
+        figs[1].savefig(os.path.join(fig_path, "high_noise_mc.png"))
 
     # results table
     print(pd.concat([dff, loc_cols], axis=1))
