@@ -131,7 +131,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data
     source_loc_combs = np.asarray(list(map(list, itertools.permutations(s_locs))))
     source_loc_idx_combs = np.asarray(list(map(list, itertools.permutations(np.arange(s_locs.shape[0])))))
     errors_matrix = np.sqrt(((source_loc_combs[:,:num_ests,:] - locs_est[np.newaxis,:,:]) ** 2).sum(axis=2)).sum(axis=1)
-    res = np.sqrt(((source_loc_combs[np.argmin(errors_matrix),:num_ests,:] - locs_est[np.newaxis,:,:]) ** 2).sum(axis=2)).flatten()
+    res = np.sqrt(((source_loc_combs[np.argmin(errors_matrix),:num_ests,:] - locs_est) ** 2).sum(axis=1)).flatten()
     results["localization_error"] = np.asarray([res.mean()])
 
     # calculate best possible localization errors with correct associations
@@ -279,7 +279,7 @@ if __name__ == "__main__":
         # parameters for localizer and data_generator
         localizer_params = dict(k={0: 4, 15: 4, 30: 4, 660: 4, 750: 4}, 
                                 multilat={i : MultilaterationOpt(method_thresh=float('inf'), seed=seed) for i in [0, 15, 30, 660, 750]}, 
-                                consistency_thresh={0: 2, 15: 30, 30: 75, 660: 500, 750: 500}, 
+                                consistency_thresh={0: 2, 15: 100, 30: 100, 660: 500, 750: 500}, 
                                 dup_thresh=1000, 
                                 prune=False,
                                 TOSSIT_locations=TOSSIT_locations,
@@ -293,7 +293,7 @@ if __name__ == "__main__":
 
         # run MC
         df = run_monte_carlo(n=100,
-                             std_list=[660], #[0, 15, 30, 660],
+                             std_list=[0, 15, 30, 660],
                              num_sources_list=range(1,5),
                              sparse_distance=2000,
                              localizer_params=localizer_params,
@@ -332,8 +332,8 @@ if __name__ == "__main__":
     location_error_list = []
     best_location_error_list = []
     std_list = []
-    location_error_dict = {(s, n): [] for s in std_list_all for n in range(num_sources_min, num_sources_max + 1)}
-    best_location_error_dict = {(s, n): [] for s in std_list_all for n in range(num_sources_min, num_sources_max + 1)} 
+    # location_error_dict = {(s, n): [] for s in std_list_all for n in range(num_sources_min, num_sources_max + 1)}
+    # best_location_error_dict = {(s, n): [] for s in std_list_all for n in range(num_sources_min, num_sources_max + 1)} 
     for _, row in df.iterrows():
         if isinstance(row['localization_error'], str):
             for err, best_err in zip(row['localization_error'].split(';')[:-1], row['best_localization_error'].split(';')[:-1]):
@@ -342,8 +342,8 @@ if __name__ == "__main__":
                 best_location_error_list.append(float(best_err))
                 std_list.append(row['std'])
 
-                location_error_dict[(row['std'], row['num_sources'])].append(float(err))
-                best_location_error_dict[(row['std'], row['num_sources'])].append(float(best_err))
+                # location_error_dict[(row['std'], row['num_sources'])].append(float(err))
+                # best_location_error_dict[(row['std'], row['num_sources'])].append(float(best_err))
 
     
     df_loc = pd.DataFrame({'num_sources': num_sources_list,
@@ -371,7 +371,13 @@ if __name__ == "__main__":
         a = np.asarray(iterable)
         a = a[~np.isnan(a)]
         return np.percentile(a, 10)
-    loc_cols = df_loc.groupby(by=['std', 'num_sources']).agg({'loc_error': ['mean', 'std', perc90], 'best_loc_error': ['mean', 'std', perc90]})
+    def rmse(iterable):
+        a = np.asarray(iterable)
+        a = a[~np.isnan(a)]
+        return np.sqrt((a ** 2).mean())
+    df_loc['loc_error'] = df_loc['loc_error'] / 1000
+    df_loc['best_loc_error'] = df_loc['best_loc_error'] / 1000
+    loc_cols = df_loc.groupby(by=['std', 'num_sources']).agg({'loc_error': [rmse, 'mean', 'std', perc90], 'best_loc_error': [rmse, 'mean', 'std', perc90]})
 
     # get figs and axes
     num_figs = 0
@@ -409,7 +415,7 @@ if __name__ == "__main__":
         if ns > 1:
             spax[i].set_ylabel("")
         else:
-            spax[i].set_ylabel("Localization Error [m]")
+            spax[i].set_ylabel("Average Simultaneous Localization Error [m]")
         spax[i].set_xlabel(f"{ns}")
         b.tick_params(labelsize=14)
 
@@ -445,7 +451,7 @@ if __name__ == "__main__":
         if ns > 1:
             spax[i].set_ylabel("")
         else:
-            spax[i].set_ylabel("Localization Error [m]")
+            spax[i].set_ylabel("Average Simultaneous Localization Error [m]")
         spax[i].set_xlabel(f"{ns}")
         b.tick_params(labelsize=14)
 
