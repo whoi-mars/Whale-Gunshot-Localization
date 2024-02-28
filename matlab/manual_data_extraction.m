@@ -4,47 +4,47 @@ clear all
 close all
 clc
 
-files = ["/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5483/5483.220523170937.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6464/6464.220523163331.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6466/6466.220523162032.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6474/6474.220523174654.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5816/5816.220523180308.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5814/5814.220523143227.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6469/6469.220523141634.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5815/5815.220523153635.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6468/6468.220523155511.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6470/6470.220523184339.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6476/6476.220523182736.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6465/6465.220523134117.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5783/5783.220523125210.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6473/6473.220523172921.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6477/6477.220523165055.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6472/6472.220523150538.wav"
-         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5818/5818.220523190912.wav"];
-timestamps = [23378+5
-              25544+11 
-              26323+4
-              21141+9 
-              20167+8
-              32808+3
-              33761+1
-              28960+2
-              27844+3
-              17736+13
-              18699+12
-              35878+8
-              38825+10
-              22194+11
-              24500+7
-              30817+6
-              16203+2];
+files = ["/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5483/5483.220524050931.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6464/6464.220524043319.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6466/6466.220524042023.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6474/6474.220524054643.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5816/5816.220524060300.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5814/5814.220524023218.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6469/6469.220524021627.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5815/5815.220524033628.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6468/6468.220524035458.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6470/6470.220524064328.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6476/6476.220524062724.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6465/6465.220524014109.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5783/5783.220524005201.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6473/6473.220524052914.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6477/6477.220524045044.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/6472/6472.220524030528.wav"
+         "/media/mark/extradrive2/SBCEX22/acoustics/2_circle_tow_riuss/5818/5818.220524070906.wav"];
+timestamps = [8769+9
+              10941+19
+              11717+13
+              6537+6  
+              5560+4
+              18202+12
+              19153+13
+              14352+10
+              13242+12
+              3132+10
+              4096+7
+              21271+11
+              24219+15
+              7586+12
+              9896+13
+              16212+12
+              1594+2];
 source_id = zeros(17,1,'single');
-location = [40.505923, -70.49119304];
+location = [40.517471, -70.70127304];
 
 % settings
 fs_save = 600; % [Hz]
 T = 6; % [s]
-save_index = 44;
+save_index = 60;
 
 %% Save Audio
 
@@ -88,9 +88,11 @@ h5create(file_name, "/data", size(calls), 'Datatype','single');
 h5create(file_name, "/sensors", size(sensorIDs),'Datatype','single');
 h5create(file_name, "/location", size(location),'Datatype','single');
 h5create(file_name, "/timestamps", size(timestamps),'Datatype','single');
+h5create(file_name, "/associations", size(timestamps.'),'Datatype','single')
 h5create(file_name, "/files", size(files), 'Datatype', 'string');
 h5write(file_name, "/data", calls);
 h5write(file_name, "/sensors", sensorIDs);
 h5write(file_name, "/location", location);
 h5write(file_name, "/timestamps", single(timestamps));
 h5write(file_name, "/files", files);
+h5write(file_name, "/associations",zeros(1,length(timestamps),'single'))
