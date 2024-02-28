@@ -1030,7 +1030,7 @@ class ParLocalizer:
                     edge_set_counter += 1
 
             # save hypergraph
-            if len(scenes):
+            if len(scenes) and self.consistency_thresh <= 3000:
                 self.H = hnx.Hypergraph(scenes)
                 assocs, locs = self.associate_and_localize(last_step=True)
 
