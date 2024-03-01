@@ -113,7 +113,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data
         if not possible:
             results["FP"] = True
             return results
-        assocs_est, locs_est = L.associate_and_localize(reduce_dups=True, last_step=True)
+        assocs_est, locs_est = L.associate_and_localize(reduce_dups=False, last_step=True)
         if len(locs_est) == 0:
             results["FN"] = True
             return results
@@ -277,7 +277,7 @@ if __name__ == "__main__":
         TOSSIT_locations = np.asarray([-ys, xs]).T
 
         # parameters for localizer and data_generator
-        localizer_params = dict(k={0: 4, 15: 4, 30: 4, 660: 4, 750: 4}, 
+        localizer_params = dict(k={0: 4, 15: 4, 30: 4, 660: 5, 750: 5}, 
                                 multilat={i : MultilaterationOpt(method_thresh=float('inf'), seed=seed) for i in [0, 15, 30, 660, 750]}, 
                                 consistency_thresh={0: 2, 15: 100, 30: 100, 660: 500, 750: 500}, 
                                 dup_thresh=1000, 
@@ -293,8 +293,8 @@ if __name__ == "__main__":
 
         # run MC
         df = run_monte_carlo(n=100,
-                             std_list=[0, 15, 30, 660],
-                             num_sources_list=range(1,5),
+                             std_list=[660], # [0, 15, 30, 660],
+                             num_sources_list=range(4,5),
                              sparse_distance=2000,
                              localizer_params=localizer_params,
                              set_measurement_params=set_measurement_params,
