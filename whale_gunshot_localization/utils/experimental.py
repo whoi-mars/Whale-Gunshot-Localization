@@ -683,7 +683,7 @@ class Localizer:
 
         return [assoc for assoc in associations if len(assoc) >= self.min_assoc_size], np.asarray([loc for i, loc in enumerate(locs) if len(associations[i]) >= self.min_assoc_size])
 
-    def associate_and_localize(self, reduce_dups=True, last_step=True):
+    def associate_and_localize(self, reduce_dups=False, last_step=True):
         """
         Using the hypergraph constructed in self.set_measurements, perform data association
         and localization.
@@ -1030,16 +1030,21 @@ class ParLocalizer:
                     edge_set_counter += 1
 
             # save hypergraph
-            if len(scenes) and self.consistency_thresh <= 3000:
+            if len(scenes):
                 self.H = hnx.Hypergraph(scenes)
                 assocs, locs = self.associate_and_localize(last_step=True)
 
-                if len(locs) == 0:
+                if len(locs) == 0 and self.consistency_thresh <= 3000:
                     self.consistency_thresh += 100
                     self.reset()
                     continue
 
                 return assocs, locs
+            elif self.consistency_thresh <= 3000:
+                self.consistency_thresh += 100
+
+                self.reset()
+                continue
             else:
                 return None, None
 
