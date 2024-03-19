@@ -18,8 +18,8 @@ parser.add_argument('--save_figs', action='store_true',
                     help="save figures (default: false)")
 # parser.add_argument('--suppress_warnings', action='store_true',
 #                     help="tell Python to suppress warnings")
-# parser.add_argument('--background', '-b', action='store_true',
-#                     help='silence the progress bar')
+parser.add_argument('--background', '-b', action='store_true',
+                    help='silence the progress bar')
 args = parser.parse_args()
 
 def run_simulation(source_params, var, TOSSIT_locations, rng, localizer_params):
@@ -32,8 +32,11 @@ def run_simulation(source_params, var, TOSSIT_locations, rng, localizer_params):
     columns = ["method_thresh", "num_sources", "std", "over_predict_sources", "FN", "FP", "percent_possible_detections"] + [f"loc_error_{i}" for i in range(max_sources)]
     df = pd.DataFrame(columns=columns)
 
-    for range_measurements, source_assocaitions, TOSSIT_associations, source_locs, source_ids in zip(range_measurements_list, source_associations_list, TOSSIT_associations_list, source_locs_list, source_ids_list):
+    for step, (range_measurements, source_assocaitions, TOSSIT_associations, source_locs, source_ids) in enumerate(zip(range_measurements_list, source_associations_list, TOSSIT_associations_list, source_locs_list, source_ids_list)):
         
+        if args.background:
+            print(f"{step}/{np.max(source_params)}")
+
         # initialize results dict
         results = {
             "over_predict_sources": float('nan'),
@@ -94,7 +97,7 @@ def run_simulation(source_params, var, TOSSIT_locations, rng, localizer_params):
         save_dict = dict(zip(columns, [[localizer_params['multilat'].method_thresh], [len(source_locs)], [np.sqrt(var)], [results["over_predict_sources"]], [results["FN"]], [results["FP"]], [len(assocs_est) / len(possible_associations)]]))
         save_dict.update(loc_error_dict)
         df = pd.concat([df, pd.DataFrame(save_dict)], ignore_index=True)
-        print(df)
+
     return df
 
 if __name__ == "__main__":
@@ -118,7 +121,7 @@ if __name__ == "__main__":
 
 
     if args.simulate:                  
-        df = run_simulation([(1,20), (4, 12), (9,15)], 
+        df = run_simulation([(1,100), (15, 100), (25, 80), (40, 60)], 
                             var=30 ** 2, 
                             TOSSIT_locations=TOSSIT_locations, 
                             rng=np.random.default_rng(1324),
@@ -126,7 +129,6 @@ if __name__ == "__main__":
         df.to_csv(csv_path, index=False)
 
     df = pd.read_csv(csv_path)
-    print(df)
     
     if args.save_figs:
         fig0 = plt.figure()

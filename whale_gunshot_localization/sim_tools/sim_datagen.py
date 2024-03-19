@@ -208,7 +208,7 @@ def generate_simple_paths(source_params, var, TOSSIT_locations, rng):
         source_ids_list.append(source_ids)
 
         # move present sources
-        unit_vecs = np.asarray([-np.sin(np.radians(headings)), np.cos(np.radians(headings))])
+        unit_vecs = np.asarray([-np.sin(np.radians(headings)), np.cos(np.radians(headings))]).T
         curr_pts[source_ids,:] += 100 * unit_vecs[source_ids,:]
     
     return range_measurements_list, source_associations_list, TOSSIT_associations_list, source_locs_list, source_ids_list
