@@ -159,6 +159,60 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
     
     return range_measurements, source_associations, TOSSIT_associations, source_locs
 
+def generate_simple_paths(source_params, var, TOSSIT_locations, rng):
+
+    # generate initial locations for sources
+    PIP = PointsInPoly(TOSSIT_locations=TOSSIT_locations, rng=rng)
+    curr_pts = PIP.generate(len(source_params))
+    headings = rng.uniform(low=0, high=360, size=(len(curr_pts)))
+
+    range_measurements_list = []
+    source_associations_list = []
+    TOSSIT_associations_list = []
+    source_locs_list = []
+    source_ids_list = []
+    for ts in range(1, np.max(source_params)):
+        
+        # storage lists
+        range_measurements = [] 
+        TOSSIT_associations = [] 
+        source_associations = []
+        source_ids = []
+        
+        for idx, interval in enumerate(source_params):
+            if interval[0] <= ts <= interval[1]:
+                source_ids.append(idx)
+        
+        # get present source locs
+        source_locs = curr_pts[source_ids,:]
+                
+        # get number of sources
+        num_sources = len(source_ids)
+
+        for t in range(TOSSIT_locations.shape[0]):
+            # calculate range measurements from all sources to TOSSIT t, adding Gaussian noise
+            r = np.abs(np.linalg.norm(source_locs - TOSSIT_locations[t,:], axis=1) + \
+                rng.normal(loc=0, scale=np.sqrt(var), size=num_sources))
+            range_measurements.append(r)
+
+            # generate arrays for the TOSSIT associations of the measuremnts.
+            TOSSIT_associations.append(np.ones((num_sources,), dtype=int) * t)
+
+            # generate arrays of source associations for the measurements
+            source_associations.append(np.arange(num_sources))
+
+        range_measurements_list.append(range_measurements)
+        source_associations_list.append(source_associations)
+        TOSSIT_associations_list.append(TOSSIT_associations)
+        source_locs_list.append(source_locs)
+        source_ids_list.append(source_ids)
+
+        # move present sources
+        unit_vecs = np.asarray([-np.sin(np.radians(headings)), np.cos(np.radians(headings))])
+        curr_pts[source_ids,:] += 100 * unit_vecs[source_ids,:]
+    
+    return range_measurements_list, source_associations_list, TOSSIT_associations_list, source_locs_list, source_ids_list
+
 def generate_trajectory(num_points, beam_width=20, measurement_stats=(0, 500000), timing_stats=(1, 0.5), repetition_time=0.5, num_repetitions=1, whale_speed=1.3, chunk_size=2, max_channel_offset=40, rng=None, in_sensors=False):
     """
     Generate a simulated trajectory/path of source locations along with time-stamped measurements

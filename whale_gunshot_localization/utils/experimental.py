@@ -13,8 +13,6 @@ from scipy.signal import resample_poly, find_peaks
 from scipy.optimize import least_squares
 import pandas as pd
 import librosa
-import dask
-from dask.distributed import Client, LocalCluster
 import multiprocessing
 from multiprocessing import Pool, cpu_count
 
