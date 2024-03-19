@@ -102,7 +102,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data
     L = Localizer(**localizer_params)
 
     # perform data assoc/loc
-    successful = L.set_measurements(measurements, **set_measurement_params)
+    successful = L.set_measurements(measurements, adaptive=False, adaptive_max=5000, threshold_delta=500)
     if not successful:
         # check for FN
         if possible:
@@ -162,7 +162,7 @@ def monte_carlo(measurements, s_assocs, t_assocs, s_locs, localizer_params, data
     
     return results
 
-def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_params, set_measurement_params, data_gen_params):
+def run_monte_carlo(n, std_list, num_sources_list, sparse_distance, localizer_params, data_gen_params):
 
     columns = ["in_sensors", "method_thresh", "num_delete", "num_sources", "std", "over_predict_sources", "FN", "FP", "percent_possible_detections", "localization_error", "best_localization_error"]
     df = pd.DataFrame(columns=columns)
@@ -284,20 +284,16 @@ if __name__ == "__main__":
                                 prune=False,
                                 TOSSIT_locations=TOSSIT_locations,
                                 min_assoc_size={0: 9, 15: 9, 30: 9, 660: 9, 750: 9})
-        set_measurement_params = dict(adaptive=False, 
-                                      adaptive_max=5000, 
-                                      threshold_delta=500)
         data_gen_params = dict(num_delete=0, 
                                in_sensors=True,
                                TOSSIT_locations=TOSSIT_locations)
 
         # run MC
         df = run_monte_carlo(n=100,
-                             std_list=[660], # [0, 15, 30, 660],
-                             num_sources_list=range(4,5),
+                             std_list=[0, 15, 30, 660],
+                             num_sources_list=range(1,5),
                              sparse_distance=2000,
                              localizer_params=localizer_params,
-                             set_measurement_params=set_measurement_params,
                              data_gen_params=data_gen_params)
         df.to_csv(path, index=False)
     
@@ -399,13 +395,13 @@ if __name__ == "__main__":
     for i in range(num_sources_max):
         dft = df_loc_low_fcp[df_loc_low_fcp['num_sources'] == ns]
         b = sns.boxplot(x=dft['type'], 
-                    y=dft['loc_error'], 
-                    hue=dft['std'], 
-                    showfliers=1,
-                    showmeans=True,
-                    linewidth=1,
-                    meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
-                    ax=spax[i])
+                        y=dft['loc_error'], 
+                        hue=dft['std'], 
+                        showfliers=True,
+                        showmeans=True,
+                        linewidth=1,
+                        meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                        ax=spax[i])
 
         # LEGEND
         if i < num_sources_max - 1:
@@ -415,15 +411,15 @@ if __name__ == "__main__":
         if ns > 1:
             spax[i].set_ylabel("")
         else:
-            spax[i].set_ylabel("Average Simultaneous Localization Error [m]")
-        spax[i].set_xlabel(f"{ns}")
-        b.tick_params(labelsize=14)
+            spax[i].set_ylabel("Average Simultaneous Localization Error [m]", fontsize=22, labelpad=20)
+        spax[i].set_xlabel(f"{ns}", fontsize=20)
+        b.tick_params(labelsize=18)
 
         ns += 1
 
     h, l = spax[i].get_legend_handles_labels()
-    spax[-1].legend(h,["$\sigma_{r}$ = " + f"{lab} m" for lab in l])
-    figs[0].text(0.5, 0.02, 'Number of Sources', ha='center')
+    spax[-1].legend(h,["$\sigma_{r}$ = " + f"{lab} m\nk = 4" for lab in l])
+    figs[0].text(0.5, 0.01, 'Number of Sources', ha='center', fontsize=18)
 
     #########################
     #     High Noise MC     #
@@ -435,31 +431,31 @@ if __name__ == "__main__":
     for i in range(num_sources_max):
         dft = df_loc_high_fcp[df_loc_high_fcp['num_sources'] == ns]
         b = sns.boxplot(x=dft['type'], 
-                    y=dft['loc_error'], 
-                    hue=dft['std'], 
-                    showfliers=1,
-                    showmeans=True,
-                    linewidth=1,
-                    meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
-                    ax=spax[i])
+                        y=dft['loc_error'], 
+                        hue=dft['std'], 
+                        showfliers=True,
+                        showmeans=True,
+                        linewidth=1,
+                        meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                        ax=spax[i])
 
         # LEGEND
-        if i < num_sources_max - 1:
+        if i > 0:
             spax[i].legend([],[], frameon=False)
         
         # LABELS
         if ns > 1:
             spax[i].set_ylabel("")
         else:
-            spax[i].set_ylabel("Average Simultaneous Localization Error [m]")
-        spax[i].set_xlabel(f"{ns}")
-        b.tick_params(labelsize=14)
+            spax[i].set_ylabel("Average Simultaneous Localization Error [m]", fontsize=22, labelpad=20)
+        spax[i].set_xlabel(f"{ns}", fontsize=20)
+        b.tick_params(labelsize=18)
 
         ns += 1
 
-    h, l = spax[i].get_legend_handles_labels()
-    spax[-1].legend(h,["$\sigma_{r}$ = " + f"{lab} m" for lab in l])
-    figs[1].text(0.5, 0.02, 'Number of Sources', ha='center')
+    h, l = spax[0].get_legend_handles_labels()
+    spax[0].legend(h,["$\sigma_{r}$ = " + f"{lab} m\nk = 5" for lab in l], loc="upper left")
+    figs[1].text(0.5, 0.01, 'Number of Sources', ha='center', fontsize=18)
 
     #---------------------------------------------------#
     #------------ finalize plot/data and save ----------#
