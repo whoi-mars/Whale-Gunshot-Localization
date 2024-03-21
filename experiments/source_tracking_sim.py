@@ -1,6 +1,8 @@
 import numpy as np
 import pyproj as proj
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+import seaborn as sns
 import itertools
 import pandas as pd
 pd.options.display.max_columns = 50
@@ -247,8 +249,12 @@ if __name__ == "__main__":
         # number of sources over time
         fig1 = plt.figure()
         plt.plot(df_std_list[0]["num_sources"])
-        plt.xlabel("Time Step")
-        plt.ylabel("Numbe of Sources")
+        plt.xticks(fontsize=18)
+        plt.yticks(fontsize=18)
+        plt.xlabel("Time Step", fontsize=18)
+        plt.ylabel("Numbe of Sources", fontsize=18)
+        plt.grid()
+        fig1.gca().yaxis.set_major_locator(MaxNLocator(integer=True))
         fig1.savefig(os.path.join(plot_path, "present_sources.png"))
 
         # plot source paths
@@ -261,54 +267,98 @@ if __name__ == "__main__":
                 xloc[jj].append(ii[1])
                 yloc[jj].append(ii[0])
         fig2 = plt.figure()
+        fig2.gca().set_axisbelow(True)
         for tn, (xx, yy) in enumerate(zip(xloc, yloc)):
-            plt.plot(np.asarray(xx) / 1000, -np.asarray(yy) / 1000, linewidth=4, label=f"target {tn+1}", zorder=1)
-        plt.plot(TOSSIT_locations[:,1] / 1000, -TOSSIT_locations[:,0] / 1000, 'kX', markersize=15, zorder=0, label="TOSSIT")
+            plt.plot(np.asarray(xx) / 1000, -np.asarray(yy) / 1000, linewidth=4, label=f"target {tn+1}", zorder=2)
+        plt.plot(TOSSIT_locations[:,1] / 1000, -TOSSIT_locations[:,0] / 1000, 'kX', markersize=15, zorder=1, label="TOSSIT")
         plt.xticks(fontsize=18)
         plt.yticks(fontsize=18)
         plt.xlabel("X [km]", fontsize=18)
         plt.ylabel("Y [km]", fontsize=18)
         plt.grid()
-        plt.legend(prop={'size': 14})
+        leg = plt.legend(prop={'size': 14})
+        leg.get_frame().set_linewidth(3.0)
+        plt.axis('square')
+        plt.ylim(-4, 8)
         fig2.savefig(os.path.join(plot_path, "source_paths.png"))
 
         # box plots
-        # df_loc_high = df[df["std"] >= 100]
-        # df_loc_low = df[df["std"] < 100]
+        df_auto = pd.melt(df, var_name='Type', value_name='Loc_Error', id_vars=['std', 'num_sources'], value_vars=[f'loc_error_{i}' for i in range(df['num_sources'].max())])
+        df_auto['Type'] = 'Automatic'
+        df_man = pd.melt(df, var_name='Target', value_name='Loc_Error', id_vars=['std', 'num_sources'], value_vars=[f'best_loc_error_{i}' for i in range(df['num_sources'].max())])
+        df_man['Type'] = 'Manual'
+        df_long = df_auto.merge(df_man, how="outer")
 
-        # max_sources = len(max(source_ids_list, key=len))
-        # fig3, ax = plt.subplots(1, max_sources, figsize=(15,10), sharey=True)
-        # figs[0].subplots_adjust(wspace=0)
-        # ns = 1
-        # for i in range(num_sources_max):
-        #     dft = df_loc_low_fcp[df_loc_high['num_sources'] == ns]
-        #     b = sns.boxplot(x=dft['type'], 
-        #                     y=dft['loc_error'], 
-        #                     hue=dft['std'], 
-        #                     showfliers=True,
-        #                     showmeans=True,
-        #                     linewidth=1,
-        #                     meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
-        #                     ax=spax[i])
+        df_loc_high = df_long[df_long["std"] >= 100]
+        df_loc_low = df_long[df_long["std"] < 100]
 
-        #     # LEGEND
-        #     if i < num_sources_max - 1:
-        #         spax[i].legend([],[], frameon=False)
+        num_sources_max = len(max(source_ids_list, key=len))
+        fig3, spax = plt.subplots(1, max_sources, figsize=(15,10), sharey=True)
+        fig3.subplots_adjust(wspace=0)
+        ns = 1
+        for i in range(num_sources_max):
+            dft = df_loc_low[df_loc_low['num_sources'] == ns]
+            b = sns.boxplot(x=dft['Type'], 
+                            y=dft['Loc_Error'], 
+                            hue=dft['std'], 
+                            showfliers=True,
+                            showmeans=True,
+                            linewidth=1,
+                            meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                            ax=spax[i])
+
+            # LEGEND
+            if i < num_sources_max - 1:
+                spax[i].legend([],[], frameon=False)
             
-        #     # LABELS
-        #     if ns > 1:
-        #         spax[i].set_ylabel("")
-        #     else:
-        #         spax[i].set_ylabel("Average Simultaneous Localization Error [m]", fontsize=22, labelpad=20)
-        #     spax[i].set_xlabel(f"{ns}", fontsize=20)
-        #     b.tick_params(labelsize=18)
+            # LABELS
+            if ns > 1:
+                spax[i].set_ylabel("")
+            else:
+                spax[i].set_ylabel("Localization Error [m]", fontsize=22, labelpad=20)
+            spax[i].set_xlabel(f"{ns}", fontsize=20)
+            spax[i].grid()
+            b.tick_params(labelsize=18)
 
-        #     ns += 1
+            ns += 1
 
-        # h, l = spax[i].get_legend_handles_labels()
-        # spax[-1].legend(h,["$\sigma_{r}$ = " + f"{lab} m\nk = 4" for lab in l])
-        # figs3.text(0.5, 0.01, 'Number of Sources', ha='center', fontsize=18)
+        h, l = spax[i].get_legend_handles_labels()
+        spax[-1].legend(h,["$\sigma_{r}$ = " + f"{lab} m" for lab in l], prop={'size': 14})
+        fig3.text(0.5, 0.01, 'Number of Sources', ha='center', fontsize=18)
+        fig3.savefig(os.path.join(plot_path, "low_noise_tracking.png"))
 
 
+        num_sources_max = len(max(source_ids_list, key=len))
+        fig4, spax = plt.subplots(1, max_sources, figsize=(15,10), sharey=True)
+        fig4.subplots_adjust(wspace=0)
+        ns = 1
+        for i in range(num_sources_max):
+            dft = df_loc_high[df_loc_high['num_sources'] == ns]
+            b = sns.boxplot(x=dft['Type'], 
+                            y=dft['Loc_Error'], 
+                            hue=dft['std'], 
+                            showfliers=True,
+                            showmeans=True,
+                            linewidth=1,
+                            meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                            ax=spax[i])
 
+            # LEGEND
+            if i < num_sources_max - 1:
+                spax[i].legend([],[], frameon=False)
+            
+            # LABELS
+            if ns > 1:
+                spax[i].set_ylabel("")
+            else:
+                spax[i].set_ylabel("Localization Error [m]", fontsize=22, labelpad=20)
+            spax[i].set_xlabel(f"{ns}", fontsize=20)
+            spax[i].grid()
+            b.tick_params(labelsize=18)
 
+            ns += 1
+
+        h, l = spax[i].get_legend_handles_labels()
+        spax[-1].legend(h,["$\sigma_{r}$ = " + f"{lab} m" for lab in l], prop={'size': 14})
+        fig4.text(0.5, 0.01, 'Number of Sources', ha='center', fontsize=18)
+        fig4.savefig(os.path.join(plot_path, "high_noise_tracking.png"))
