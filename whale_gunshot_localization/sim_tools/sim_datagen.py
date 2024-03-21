@@ -159,12 +159,16 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
     
     return range_measurements, source_associations, TOSSIT_associations, source_locs
 
-def generate_simple_paths(source_params, var, TOSSIT_locations, rng):
+def generate_simple_paths(source_params, var, TOSSIT_locations, rng, loc0=None, bearing0=None, beamwidth=None):
 
     # generate initial locations for sources
-    PIP = PointsInPoly(TOSSIT_locations=TOSSIT_locations, rng=rng)
-    curr_pts = PIP.generate(len(source_params))
-    headings = rng.uniform(low=0, high=360, size=(len(curr_pts)))
+    if loc0 is None or bearing0 is None:
+        PIP = PointsInPoly(TOSSIT_locations=TOSSIT_locations, rng=rng)
+        curr_pts = PIP.generate(len(source_params))
+        headings = rng.uniform(low=0, high=360, size=(len(curr_pts)))
+    else:
+        curr_pts = loc0
+        headings = bearing0
 
     range_measurements_list = []
     source_associations_list = []
@@ -208,7 +212,9 @@ def generate_simple_paths(source_params, var, TOSSIT_locations, rng):
         source_ids_list.append(source_ids)
 
         # move present sources
+        if beamwidth is not None:
+            headings += rng.uniform(low=-beamwidth, high=beamwidth, size=len(headings))
         unit_vecs = np.asarray([-np.sin(np.radians(headings)), np.cos(np.radians(headings))]).T
-        curr_pts[source_ids,:] += 100 * unit_vecs[source_ids,:]
+        curr_pts[source_ids,:] += 70 * unit_vecs[source_ids,:]
     
     return range_measurements_list, source_associations_list, TOSSIT_associations_list, source_locs_list, source_ids_list

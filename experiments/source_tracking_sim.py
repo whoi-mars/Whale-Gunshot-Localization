@@ -3,8 +3,11 @@ import pyproj as proj
 import matplotlib.pyplot as plt
 import itertools
 import pandas as pd
+pd.options.display.max_columns = 50
 import os
 import argparse
+import scipy
+import scipy.stats as stats
 
 import whale_gunshot_localization.sim_tools.sim_datagen as sim_datagen
 from whale_gunshot_localization.utils.experimental import ParLocalizer, MultilaterationOpt
@@ -26,23 +29,34 @@ def perc10(iterable):
     a = np.asarray(iterable)
     a = a[~np.isnan(a)]
     return np.percentile(a, 10)
+def cdf1(iterable):
+    a = np.asarray(iterable)
+    a = a[~np.isnan(a)]
+    return len(a[a == 1.0]) / len(a)
 
-def run_simulation(source_params, var, TOSSIT_locations, rng, localizer_params):
+def run_simulation(source_params, std_list, TOSSIT_locations, seed, localizer_params, loc0=None, bearing0=None, beamwidth=None):
 
-    for i, v in enumerate(var):
+    for i, std in enumerate(std_list):
+        rng = np.random.default_rng(seed)
+
+        localizer_params_final = localizer_params.copy()
+        localizer_params_final['consistency_thresh'] = localizer_params_final['consistency_thresh'][std]
+        localizer_params_final['multilat'] = localizer_params_final['multilat'][std]
+        localizer_params_final['k'] = localizer_params_final['k'][std]
 
         # simulate signals
-        range_measurements_list, source_associations_list, TOSSIT_associations_list, source_locs_list, source_ids_list = sim_datagen.generate_simple_paths(source_params, v ** 2, TOSSIT_locations, rng)
+        range_measurements_list, source_associations_list, TOSSIT_associations_list, source_locs_list, source_ids_list = sim_datagen.generate_simple_paths(source_params, std ** 2, TOSSIT_locations, rng, loc0=loc0.copy(), bearing0=bearing0.copy(), beamwidth=beamwidth)
         max_sources = len(max(source_ids_list, key=len))
 
         # dataframe to store results
         if i == 0:
-            columns = ["method_thresh", "num_sources", "std", "over_predict_sources", "FN", "FP", "percent_possible_detections"] + [f"loc_error_{i}" for i in range(max_sources)]
+            columns = ["method_thresh", "num_sources", "std", "over_predict_sources", "FN", "FP", "percent_possible_detections"] + [f"loc_error_{i}" for i in range(max_sources)] + [f"best_loc_error_{i}" for i in range(max_sources)]
             df = pd.DataFrame(columns=columns)
 
         for step, (range_measurements, source_assocaitions, TOSSIT_associations, source_locs, source_ids) in enumerate(zip(range_measurements_list, source_associations_list, TOSSIT_associations_list, source_locs_list, source_ids_list)):
-            
             if args.background:
+                if step == 0:
+                    print(f"working on std = {std}...")
                 print(f"{step+1}/{np.max(source_params)}")
 
             # initialize results dict
@@ -58,12 +72,12 @@ def run_simulation(source_params, var, TOSSIT_locations, rng, localizer_params):
             possible_associations = []
             for p in range(max(assoc_flat) + 1):
                 group = np.where(assoc_flat == p)[0]
-                if len(group) >= localizer_params["min_assoc_size"]:
+                if len(group) >= localizer_params_final["min_assoc_size"]:
                     possible_associations.append(p)
             possible = (len(possible_associations) > 0)
 
             # data association/localizatoin
-            L = ParLocalizer(**localizer_params)
+            L = ParLocalizer(**localizer_params_final)
             successful = L.set_measurements(range_measurements)
 
             if not successful:
@@ -74,36 +88,77 @@ def run_simulation(source_params, var, TOSSIT_locations, rng, localizer_params):
                 # check for FP
                 if not possible:
                     results["FP"] = True
-                    return results
-                assocs_est, locs_est = L.associate_and_localize(last_step=True)
-                if len(locs_est) == 0:
-                    results["FN"] = True
-                    return results
+                    assocs_est = []
+                    locs_est = []
+                else:
+                    assocs_est, locs_est = L.associate_and_localize(last_step=True)
+                    if len(locs_est) == 0:
+                        results["FN"] = True
 
-            # if no FP or FN, set over_predict_sources to False
-            results["over_predict_sources"] = False
 
-            # if we predict too many sources return
-            if locs_est.shape[0] > source_locs.shape[0]:
-                results["over_predict_sources"] = True
+            if not results["FN"] and not results["FP"]:
+                # if we predict too many sources return
+                if locs_est.shape[0] > source_locs.shape[0]:
+                    results["over_predict_sources"] = True
+                else:
+                    # if no FP or FN, set over_predict_sources to False
+                    results["over_predict_sources"] = False
+                    
 
-            # align source locations and estimated source locations
-            num_ests = locs_est.shape[0]
-            est_loc_combs = np.asarray(list(map(list, itertools.permutations(locs_est))))
-            est_loc_idx_combs = np.asarray(list(map(list, itertools.permutations(np.arange(locs_est.shape[0])))))
-            errors_matrix = np.sqrt(((est_loc_combs[:,:num_ests,:] - source_locs[np.newaxis,:,:]) ** 2).sum(axis=2)).sum(axis=1)
-            res = np.sqrt(((est_loc_combs[np.argmin(errors_matrix),:num_ests,:] - source_locs) ** 2).sum(axis=1)).flatten()
-            
-            # add error values to appropriate lists
-            detection_idxs = est_loc_idx_combs[np.argmin(errors_matrix)]
-            names = [f"loc_error_{i}" for i in range(max_sources)]
+            names_est = [f"loc_error_{i}" for i in range(max_sources)]
+            names_best = [f"best_loc_error_{i}" for i in range(max_sources)]
             values = [float('nan') for i in range(max_sources)]
-            loc_error_dict = dict(zip(names, values))        
-            for err, idx in zip(res, detection_idxs):
-                loc_error_dict[f"loc_error_{source_ids[idx]}"] = err
+            loc_error_dict = dict(zip(names_est, values))
+            best_loc_error_dict = dict(zip(names_best, values))       
+            if results["over_predict_sources"] == False:
+                # align source locations and estimated source locations
+                num_ests = locs_est.shape[0]
+                nans = np.zeros((source_locs.shape[0] - num_ests, 2))
+                nans[:] = np.nan
+                locs_est = np.concatenate((locs_est, nans), axis=0)
 
-            save_dict = dict(zip(columns, [[localizer_params['multilat'].method_thresh], [len(source_locs)], [np.sqrt(var)], [results["over_predict_sources"]], [results["FN"]], [results["FP"]], [len(assocs_est) / len(possible_associations)]]))
+                est_loc_combs = np.asarray(list(map(list, itertools.permutations(locs_est))))
+                est_loc_idx_combs = np.asarray(list(map(list, itertools.permutations(np.arange(locs_est.shape[0])))))
+                errors_matrix = np.nansum(np.sqrt(((est_loc_combs - source_locs[np.newaxis,:,:]) ** 2).sum(axis=2)), axis=1)
+                res = np.sqrt(((est_loc_combs[np.argmin(errors_matrix),:,:] - source_locs) ** 2).sum(axis=1)).flatten()
+                
+                # add error values to appropriate lists
+                detection_idxs = est_loc_idx_combs[np.argmin(errors_matrix)] 
+                for err, idx in zip(res, detection_idxs):
+                    loc_error_dict[f"loc_error_{source_ids[idx]}"] = err
+
+                # get best localizations
+                measurements_flat = np.concatenate(range_measurements)
+                TOSSIT_flat = np.concatenate(TOSSIT_associations)
+                assoc_flat = np.concatenate(source_assocaitions)
+                localizer = localizer_params_final['multilat']
+                localizer.set_map({
+                    'TOSSIT_locations' : localizer_params_final['TOSSIT_locations'],
+                    'min_x' : config['scaling']['min_x'],
+                    'max_x' : config['scaling']['max_x'],
+                    'min_y' : config['scaling']['min_y'],
+                    'max_y' : config['scaling']['max_y'],
+                })
+
+                best_locs = []
+                for c, didx in enumerate(detection_idxs):
+                    if np.isnan(locs_est[didx,:].sum()):
+                        best_locs.append(np.asarray([float('nan'), float('nan')]))
+                    else:
+                        idx = np.where(assoc_flat == c)[0]
+                        _, loc = localizer.localize(measurements_flat[idx], TOSSIT_flat[idx])
+                        best_locs.append(loc)
+                best_locs = np.asarray(best_locs)
+                best_res = np.sqrt(((best_locs - source_locs) ** 2).sum(axis=1))
+                for err, idx in zip(best_res, detection_idxs):
+                    best_loc_error_dict[f"best_loc_error_{source_ids[idx]}"] = err
+
+            if results["over_predict_sources"] == False:
+                save_dict = dict(zip(columns, [[localizer_params_final['multilat'].method_thresh], [len(source_locs)], [std], [results["over_predict_sources"]], [results["FN"]], [results["FP"]], [len(assocs_est) / len(possible_associations)]]))
+            else:
+                save_dict = dict(zip(columns, [[localizer_params_final['multilat'].method_thresh], [len(source_locs)], [std], [results["over_predict_sources"]], [results["FN"]], [results["FP"]], [float('nan')]]))
             save_dict.update(loc_error_dict)
+            save_dict.update(best_loc_error_dict)
             df = pd.concat([df, pd.DataFrame(save_dict)], ignore_index=True)
 
     return df
@@ -118,51 +173,75 @@ if __name__ == "__main__":
     ############
     # Settings #
     ############ 
+    seed = 1324
     csv_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "data_assoc_and_loc", "source_tracking_sim_results.csv")
+    stats_csv_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "data_assoc_and_loc", "source_tracking_sim_stats.csv")
     plot_path = os.path.join(PROJECT_ROOT_DIR, "experiments","results", "data_assoc_and_loc")
-
-    localizer_params = dict(k=4,
-                            multilat=MultilaterationOpt(method_thresh=float('inf')),
-                            consistency_thresh=100,
+    source_params = [(1,160), (40, 160), (60, 140), (85, 125)] # [(1,100), (15, 100), (25, 80), (40, 60)]
+    std_list = [0, 15, 30, 660]
+    beamwidth = None
+    source_locs = np.asarray([[-5600.,200.],
+                              [-5100.,-600.],
+                              [-2500.,-1300.],
+                              [-100.,-1000]])
+    bearings = np.asarray([-40., -45., 200., 280.])
+    localizer_params = dict(k={0: 4, 15: 4, 30: 4, 660: 5},
+                            multilat={i : MultilaterationOpt(method_thresh=float('inf'), seed=seed) for i in std_list},
+                            consistency_thresh={0: 2, 15: 100, 30: 100, 660: 500},
                             TOSSIT_locations=TOSSIT_locations,
                             min_assoc_size=9)
 
-
     if args.simulate:                  
-        df = run_simulation([(1,100), (15, 100), (25, 80), (40, 60)], 
-                            std=[30], 
+        df = run_simulation(source_params, 
+                            std_list=std_list, 
                             TOSSIT_locations=TOSSIT_locations, 
-                            rng=np.random.default_rng(1324),
-                            localizer_params=localizer_params)
+                            seed=seed,
+                            localizer_params=localizer_params,
+                            loc0=source_locs,
+                            bearing0=bearings,
+                            beamwidth=beamwidth)
         df.to_csv(csv_path, index=False)
 
     # load data
     df = pd.read_csv(csv_path)
 
     # get stats
-    df_std = df.groupby(by=["std"]).agg(({'over_predict_sources': ['mean'],
-                                          'FN': ['mean'],
-                                          'FP': ['mean'],
-                                          'loc_error_0': ['mean'],
-                                          'loc_error_1': ['mean'],
-                                          'loc_error_2': ['mean'],
-                                          'loc_error_3': ['mean'],
-                                          'percent_possible_detections': ['mean','std',perc10]}))
+    base_agg_dict = {'over_predict_sources': ['mean'],
+                     'FN': ['mean'],
+                     'FP': ['mean'],
+                     'percent_possible_detections': ['mean','std',perc10,cdf1]}
+    loc_agg_dict = {i : ['mean', 'std'] for i in list(df.columns[df.columns.str.contains('loc_error_')])}
+    best_loc_agg_dict = {i : ['mean', 'std'] for i in list(df.columns[df.columns.str.contains('best_loc_error_')])}
+    base_agg_dict.update(loc_agg_dict)
+    base_agg_dict.update(best_loc_agg_dict)
+    df_std = df.groupby(by=["std", "num_sources"]).agg((base_agg_dict))
     print(df_std)
+    df_std.to_csv(stats_csv_path)
 
     # get results for each noise level
-    df_std_list = [df[df["std"] == i] for i in [30]]
+    std_list = np.unique(df["std"])
+    df_std_list = [df[df["std"] == i] for i in std_list]
 
     if args.save_figs:
 
         # error of targets over time
-        fig0 = plt.figure()
-        for i in range(df['num_sources'].max()):
-            plt.plot(df[f"loc_error_{i}"], label=f"target {i+1}")
-        plt.legend()
-        plt.grid()
-        plt.xlabel("Time Step")
-        plt.ylabel("Localization Error [m]")
+        rows = int(np.floor(np.sqrt(len(std_list))));
+        columns = int(np.ceil(len(std_list)/rows));
+        fig0, axs = plt.subplots(rows, columns)
+        if not isinstance(axs, np.ndarray):
+            axs = np.asarray([[axs]])
+        c = 0
+        for ax in axs:
+            for ax2 in ax:
+                for i in range(df['num_sources'].max()):
+                    ax2.plot(np.arange(1, np.max(source_params)+1), df_std_list[c][f"loc_error_{i}"], label=f"target {i+1}")
+                ax2.legend()
+                ax2.grid()
+                ax2.set_xlabel("Time Step")
+                ax2.set_ylabel("Localization Error [m]")
+                ax2.set_title(f"{std_list[c]} [m]")
+                c += 1
+        fig0.tight_layout()
         fig0.savefig(os.path.join(plot_path, "target_loc_error.png"))
 
         # number of sources over time
@@ -171,5 +250,65 @@ if __name__ == "__main__":
         plt.xlabel("Time Step")
         plt.ylabel("Numbe of Sources")
         fig1.savefig(os.path.join(plot_path, "present_sources.png"))
+
+        # plot source paths
+        _, _, _, source_locs_list, source_ids_list = sim_datagen.generate_simple_paths(source_params, 0, TOSSIT_locations, np.random.default_rng(seed), loc0=source_locs.copy(), bearing0=bearings.copy(), beamwidth=beamwidth)
+        max_sources = len(max(source_ids_list, key=len))
+        xloc = [[] for _ in range(max_sources)]
+        yloc = [[] for _ in range(max_sources)]
+        for i, j in zip(source_locs_list, source_ids_list):
+            for ii, jj in zip(i, j):
+                xloc[jj].append(ii[1])
+                yloc[jj].append(ii[0])
+        fig2 = plt.figure()
+        for tn, (xx, yy) in enumerate(zip(xloc, yloc)):
+            plt.plot(np.asarray(xx) / 1000, -np.asarray(yy) / 1000, linewidth=4, label=f"target {tn+1}", zorder=1)
+        plt.plot(TOSSIT_locations[:,1] / 1000, -TOSSIT_locations[:,0] / 1000, 'kX', markersize=15, zorder=0, label="TOSSIT")
+        plt.xticks(fontsize=18)
+        plt.yticks(fontsize=18)
+        plt.xlabel("X [km]", fontsize=18)
+        plt.ylabel("Y [km]", fontsize=18)
+        plt.grid()
+        plt.legend(prop={'size': 14})
+        fig2.savefig(os.path.join(plot_path, "source_paths.png"))
+
+        # box plots
+        # df_loc_high = df[df["std"] >= 100]
+        # df_loc_low = df[df["std"] < 100]
+
+        # max_sources = len(max(source_ids_list, key=len))
+        # fig3, ax = plt.subplots(1, max_sources, figsize=(15,10), sharey=True)
+        # figs[0].subplots_adjust(wspace=0)
+        # ns = 1
+        # for i in range(num_sources_max):
+        #     dft = df_loc_low_fcp[df_loc_high['num_sources'] == ns]
+        #     b = sns.boxplot(x=dft['type'], 
+        #                     y=dft['loc_error'], 
+        #                     hue=dft['std'], 
+        #                     showfliers=True,
+        #                     showmeans=True,
+        #                     linewidth=1,
+        #                     meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+        #                     ax=spax[i])
+
+        #     # LEGEND
+        #     if i < num_sources_max - 1:
+        #         spax[i].legend([],[], frameon=False)
+            
+        #     # LABELS
+        #     if ns > 1:
+        #         spax[i].set_ylabel("")
+        #     else:
+        #         spax[i].set_ylabel("Average Simultaneous Localization Error [m]", fontsize=22, labelpad=20)
+        #     spax[i].set_xlabel(f"{ns}", fontsize=20)
+        #     b.tick_params(labelsize=18)
+
+        #     ns += 1
+
+        # h, l = spax[i].get_legend_handles_labels()
+        # spax[-1].legend(h,["$\sigma_{r}$ = " + f"{lab} m\nk = 4" for lab in l])
+        # figs3.text(0.5, 0.01, 'Number of Sources', ha='center', fontsize=18)
+
+
 
 
