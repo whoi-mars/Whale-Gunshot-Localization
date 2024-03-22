@@ -2,6 +2,7 @@ import numpy as np
 import pyproj as proj
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+import matplotlib.patches as mpatches
 import seaborn as sns
 import itertools
 import pandas as pd
@@ -285,7 +286,7 @@ if __name__ == "__main__":
         # box plots
         df_auto = pd.melt(df, var_name='Type', value_name='Loc_Error', id_vars=['std', 'num_sources'], value_vars=[f'loc_error_{i}' for i in range(df['num_sources'].max())])
         df_auto['Type'] = 'Automatic'
-        df_man = pd.melt(df, var_name='Target', value_name='Loc_Error', id_vars=['std', 'num_sources'], value_vars=[f'best_loc_error_{i}' for i in range(df['num_sources'].max())])
+        df_man = pd.melt(df, var_name='Type', value_name='Loc_Error', id_vars=['std', 'num_sources'], value_vars=[f'best_loc_error_{i}' for i in range(df['num_sources'].max())])
         df_man['Type'] = 'Manual'
         df_long = df_auto.merge(df_man, how="outer")
 
@@ -362,3 +363,126 @@ if __name__ == "__main__":
         spax[-1].legend(h,["$\sigma_{r}$ = " + f"{lab} m" for lab in l], prop={'size': 14})
         fig4.text(0.5, 0.01, 'Number of Sources', ha='center', fontsize=18)
         fig4.savefig(os.path.join(plot_path, "high_noise_tracking.png"))
+
+
+    # box plots with separated targets
+    df_auto = pd.melt(df, var_name='Target', value_name='Loc_Error', id_vars=['std', 'num_sources'], value_vars=[f'loc_error_{i}' for i in range(df['num_sources'].max())])
+    df_auto['Type'] = "Automatic"
+    df_man = pd.melt(df, var_name='Target', value_name='Loc_Error', id_vars=['std', 'num_sources'], value_vars=[f'best_loc_error_{i}' for i in range(df['num_sources'].max())])
+    df_man['Type'] = "Manual"
+    df_long = df_auto.merge(df_man, how="outer")
+
+    colors = sns.color_palette("tab10")
+
+    def d(inp):
+        if inp[:5] == "best_":
+            return inp[5:]
+        else:
+            return inp
+
+    df_loc_high = df_long[df_long["std"] >= 100]
+    df_loc_low = df_long[df_long["std"] < 100]
+    std_list_high = [j for j in std_list if j >= 100]
+    std_list_low = [j for j in std_list if j < 100]
+
+    num_sources_max = len(max(source_ids_list, key=len))
+    fig5, spax = plt.subplots(1, num_sources_max, figsize=(15,10), sharey=True)
+    fig5.subplots_adjust(wspace=0)
+    ns = 1
+    for i in range(num_sources_max):
+        dft = df_loc_low[df_loc_low['num_sources'] == ns]
+        for j in range(i+1, num_sources_max):
+            dft = dft[dft['Target'] != f'loc_error_{j}']
+            dft = dft[dft['Target'] != f'best_loc_error_{j}']
+        targets = dft['Target']
+        dft['Target'] = targets.apply(d)
+        b = sns.boxplot(x=dft['Type'], 
+                        y=dft['Loc_Error'], 
+                        hue=dft[['Target', 'std']].apply(tuple, axis=1), 
+                        showfliers=True,
+                        showmeans=True,
+                        hue_order=[(f'loc_error_{k}', m) for m in std_list_low for k in range(i+1)],
+                        linewidth=1,
+                        meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                        ax=spax[i])
+        
+        plist = list(spax[i].patches)
+        plist = [p for p in plist if "Rectangle" not in str(p)]
+        c = 0
+        for idx, p in enumerate(plist):
+            p.set_facecolor(colors[c])
+            if (idx+1) % (i+1) == 0:
+                c += 1
+            if (idx+1) % (len(std_list_low)*(i+1)) == 0:
+                c = 0
+
+        # LEGEND
+        if i < num_sources_max - 1:
+            spax[i].legend([],[], frameon=False)
+        
+        # LABELS
+        if ns > 1:
+            spax[i].set_ylabel("")
+        else:
+            spax[i].set_ylabel("Localization Error [m]", fontsize=22, labelpad=20)
+        spax[i].set_xlabel(f"{ns}", fontsize=20)
+        spax[i].grid()
+        b.tick_params(labelsize=18)
+
+        ns += 1
+    
+    spax[-1].legend(handles=[mpatches.Patch(color=colors[i], label="$\sigma_{r}$ = " + f"{std} m") for (i, std) in enumerate(std_list_low)], prop={'size': 14})
+    fig5.text(0.5, 0.01, 'Number of Sources', ha='center', fontsize=18)
+    fig5.savefig(os.path.join(plot_path, "low_noise_tracking_p.png"))
+
+    
+    
+    num_sources_max = len(max(source_ids_list, key=len))
+    fig6, spax = plt.subplots(1, num_sources_max, figsize=(15,10), sharey=True)
+    fig6.subplots_adjust(wspace=0)
+    ns = 1
+    for i in range(num_sources_max):
+        dft = df_loc_high[df_loc_high['num_sources'] == ns]
+        for j in range(i+1, num_sources_max):
+            dft = dft[dft['Target'] != f'loc_error_{j}']
+            dft = dft[dft['Target'] != f'best_loc_error_{j}']
+        targets = dft['Target']
+        dft['Target'] = targets.apply(d)
+        b = sns.boxplot(x=dft['Type'], 
+                        y=dft['Loc_Error'], 
+                        hue=dft[['Target', 'std']].apply(tuple, axis=1), 
+                        showfliers=True,
+                        showmeans=True,
+                        hue_order=[(f'loc_error_{k}', m) for m in std_list_high for k in range(i+1)],
+                        linewidth=1,
+                        meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                        ax=spax[i])
+        
+        plist = list(spax[i].patches)
+        plist = [p for p in plist if "Rectangle" not in str(p)]
+        c = 0
+        for idx, p in enumerate(plist):
+            p.set_facecolor(colors[c])
+            if (idx+1) % (i+1) == 0:
+                c += 1
+            if (idx+1) % (len(std_list_high)*(i+1)) == 0:
+                c = 0
+
+        # LEGEND
+        if i < num_sources_max - 1:
+            spax[i].legend([],[], frameon=False)
+        
+        # LABELS
+        if ns > 1:
+            spax[i].set_ylabel("")
+        else:
+            spax[i].set_ylabel("Localization Error [m]", fontsize=22, labelpad=20)
+        spax[i].set_xlabel(f"{ns}", fontsize=20)
+        spax[i].grid()
+        b.tick_params(labelsize=18)
+
+        ns += 1
+    
+    spax[-1].legend(handles=[mpatches.Patch(color=colors[i], label="$\sigma_{r}$ = " + f"{std} m") for (i, std) in enumerate(std_list_high)], prop={'size': 14})
+    fig6.text(0.5, 0.01, 'Number of Sources', ha='center', fontsize=18)
+    fig6.savefig(os.path.join(plot_path, "high_noise_tracking_p.png"))
