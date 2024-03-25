@@ -159,7 +159,9 @@ def generate_measurements(num_sources, rng, var=10, num_delete=0, in_sensors=Fal
     
     return range_measurements, source_associations, TOSSIT_associations, source_locs
 
-def generate_simple_paths(source_params, var, TOSSIT_locations, rng, loc0=None, bearing0=None, beamwidth=None):
+def generate_simple_paths(source_params, var, TOSSIT_locations, rng, loc0=None, bearing0=None, beamwidth=None, n_del=0):
+
+    assert (n_del == 0) or (TOSSIT_locations.shape[0] - n_del >= 3), "cannot make source impossible to localize"
 
     # generate initial locations for sources
     if loc0 is None or bearing0 is None:
@@ -204,6 +206,15 @@ def generate_simple_paths(source_params, var, TOSSIT_locations, rng, loc0=None, 
 
             # generate arrays of source associations for the measurements
             source_associations.append(np.arange(num_sources))
+
+        # optional delete measurements
+        if n_del is not None:
+            for _ in range(n_del*num_sources):
+                tidx = np.random.choice(TOSSIT_locations.shape[0])
+                midx = np.random.choice(len(range_measurements[tidx]))
+                range_measurements[tidx] = np.delete(range_measurements[tidx], midx)
+                source_associations[tidx] = np.delete(source_associations[tidx], midx)
+                TOSSIT_associations[tidx] = np.delete(TOSSIT_associations[tidx], midx)
 
         range_measurements_list.append(range_measurements)
         source_associations_list.append(source_associations)

@@ -426,7 +426,7 @@ if __name__ == "__main__":
         else:
             spax[i].set_ylabel("Localization Error [m]", fontsize=22, labelpad=20)
         spax[i].set_xlabel(f"{ns}", fontsize=20)
-        spax[i].grid()
+        spax[i].grid(axis='y')
         b.tick_params(labelsize=18)
 
         ns += 1
@@ -457,7 +457,7 @@ if __name__ == "__main__":
                         linewidth=1,
                         meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
                         ax=spax[i])
-        
+
         plist = list(spax[i].patches)
         plist = [p for p in plist if "Rectangle" not in str(p)]
         c = 0
@@ -478,7 +478,7 @@ if __name__ == "__main__":
         else:
             spax[i].set_ylabel("Localization Error [m]", fontsize=22, labelpad=20)
         spax[i].set_xlabel(f"{ns}", fontsize=20)
-        spax[i].grid()
+        spax[i].grid(axis='y')
         b.tick_params(labelsize=18)
 
         ns += 1
