@@ -189,16 +189,20 @@ if __name__ == "__main__":
     seed = 1324
     num_sources = 4
     source_params = [(1,50) for _ in range(num_sources)] # [(1,100), (15, 100), (25, 80), (40, 60)]
-    std_list = [0, 15, 30]
+    std_list = [0, 15, 30, 660]
     beamwidth = None
     num_delete = [1, 2, 3]
+    # source_locs = np.asarray([[-5600.,1000.],
+    #                           [-5100.,200.],
+    #                           [-3800.,-2600.],
+    #                           [-2000.,-3700]])
     source_locs = np.asarray([[-5600.,200.],
                               [-5100.,-600.],
-                              [-2500.,-1300.],
-                              [-100.,-1000]])
+                              [-2800.,-1300.],
+                              [-1000.,-1000]])
     bearings = np.asarray([-40., -45., 200., 280.])
     localizer_params = dict(k={0: 4, 15: 4, 30: 4, 660: 5},
-                            multilat={i : MultilaterationOpt(method_thresh=float('inf'), seed=seed) for i in std_list},
+                            multilat={i : MultilaterationOpt(method_thresh=float('inf'), seed=seed) if i < 100 else MultilaterationOpt(method_thresh=0.98, seed=seed) for i in std_list},
                             consistency_thresh={0: 2, 15: 100, 30: 100, 660: 500},
                             TOSSIT_locations=TOSSIT_locations,
                             min_assoc_size=9)
@@ -280,29 +284,89 @@ if __name__ == "__main__":
         df_man = pd.melt(df, var_name='Target', value_name='Loc_Error', id_vars=['std', 'num_sources', 'n_delete'], value_vars=[f'best_loc_error_{i}' for i in range(df['num_sources'].max())])
         df_man['Type'] = "Manual"
         df_long = df_auto.merge(df_man, how="outer")
-        
+
+        df_long_high = df_long[df_long["std"] >= 100]
+        df_long_low = df_long[df_long["std"] < 100]
+        std_list_high = [j for j in std_list if j >= 100]
+        std_list_low = [j for j in std_list if j < 100]
+
+        # box
         c = 0
         fig3, axs = plt.subplots(1,len(num_del_list), figsize=(10,5), sharey=True)
         std_str_list = [str(std) for std in std_list]
         for nd in num_del_list:
-            meds_m = []
-            meds_a = []
-            for std in std_list:
-                dft_m = df_long[(df_long["std"] == std) & (df_long["n_delete"] == nd) & (df_long["Type"] == "Manual")]
-                dft_a = df_long[(df_long["std"] == std) & (df_long["n_delete"] == nd) & (df_long["Type"] == "Automatic")]
-                # print(dft_a)
-                # print()
-                # print(dft_m)
-                meds_m.append(dft_m["Loc_Error"].median())
-                meds_a.append(dft_a["Loc_Error"].median())
-            axs[c].plot(std_str_list, meds_m, '-o')
-            axs[c].plot(std_str_list, meds_a, '-o')
+            dft = df_long_low[df_long_low['n_delete'] == nd]
+            b = sns.boxplot(x=dft['std'], 
+                            y=dft['Loc_Error'], 
+                            hue=dft['Type'],
+                            showfliers=True,
+                            showmeans=True,
+                            linewidth=1,
+                            meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                            ax=axs[c])
             axs[c].set_title(f"Missing Data: {np.around(((nd) / (TOSSIT_locations.shape[0]))*100, 2)}%")
             axs[c].grid()
+            # axs[c].set_yscale('log')
             if c == 0:
                 axs[c].set_ylabel("Median Localization Error [m]")
             axs[c].set_xlabel("$\sigma_{r}$ [m]")
             c += 1
-        fig3.savefig(os.path.join(plot_path, "del_analysis.png"))
+        fig3.savefig(os.path.join(plot_path, "del_analysis_box_low.png"))
 
+        c = 0
+        fig3, axs = plt.subplots(1,len(num_del_list), figsize=(10,5), sharey=True)
+        std_str_list = [str(std) for std in std_list]
+        for nd in num_del_list:
+            dft = df_long_high[df_long_high['n_delete'] == nd]
+            b = sns.boxplot(x=dft['std'], 
+                            y=dft['Loc_Error'], 
+                            hue=dft['Type'],
+                            showfliers=True,
+                            showmeans=True,
+                            linewidth=1,
+                            meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
+                            ax=axs[c])
+            axs[c].set_title(f"Missing Data: {np.around(((nd) / (TOSSIT_locations.shape[0]))*100, 2)}%")
+            axs[c].grid(axis='y')
+            if c > 0:
+                axs[c].set_ylabel("")
+            # axs[c].set_yscale('log')
+            if c == 0:
+                axs[c].set_ylabel("Median Localization Error [m]")
+            axs[c].set_xlabel("$\sigma_{r}$ [m]")
+            c += 1
+        fig3.savefig(os.path.join(plot_path, "del_analysis_box_high.png"))
+
+        # number of sources detected
+        df_high = df[df["std"] == 660]
+        fig4, axs = plt.subplots(1,len(num_delete), sharey=True)
+        for c, nd in enumerate(num_delete):
+            dft = df_high[df_high['n_delete'] == nd]
+            counts, bins = np.histogram(dft['percent_possible_detections']*4, bins=np.arange(0,5)+0.5)
+            axs[c].hist(bins[:-1], bins, weights=counts, ec='k')
+            axs[c].xaxis.set_major_locator(MaxNLocator(integer=True))
+            axs[c].grid(axis='y')
+            axs[c].set_axisbelow(True)
+            if c == 0:
+                axs[c].set_ylabel("Number of Algorithm Runs")
+            axs[c].set_xlabel("Number of Sources Detected")
+        fig4.savefig(os.path.join(plot_path, "num_sources_detected.png"))
+
+        # number of sources detected
+        df_high = df[df["std"] == 660]
+        fig4, axs = plt.subplots(1,len(num_delete), sharey=True)
+        bins = np.arange(0,5)+0.5
+        for c, nd in enumerate(num_delete):
+            dft = df_high[df_high['n_delete'] == nd]
+            counts = []
+            for i in range(num_sources):
+                counts.append(100*np.sum(~np.isnan(dft[f'loc_error_{i}'])) / len(dft[f'loc_error_{i}']))
+            axs[c].hist(bins[:-1], bins, weights=counts, ec='k')
+            axs[c].xaxis.set_major_locator(MaxNLocator(integer=True))
+            axs[c].grid(axis='y')
+            axs[c].set_axisbelow(True)
+            if c == 0:
+                axs[c].set_ylabel("Detection Rate [%]")
+            axs[c].set_xlabel("Target Number")
+        fig4.savefig(os.path.join(plot_path, "per_source_detection.png"))
         
