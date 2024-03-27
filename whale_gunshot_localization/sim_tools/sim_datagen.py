@@ -209,12 +209,17 @@ def generate_simple_paths(source_params, var, TOSSIT_locations, rng, loc0=None, 
 
         # optional delete measurements
         if n_del is not None:
-            for _ in range(n_del*num_sources):
-                tidx = np.random.choice(TOSSIT_locations.shape[0])
-                midx = np.random.choice(len(range_measurements[tidx]))
-                range_measurements[tidx] = np.delete(range_measurements[tidx], midx)
-                source_associations[tidx] = np.delete(source_associations[tidx], midx)
-                TOSSIT_associations[tidx] = np.delete(TOSSIT_associations[tidx], midx)
+            for s in range(num_sources):
+                for _ in range(n_del):
+                    while True:
+                        tidx = np.random.choice(TOSSIT_locations.shape[0])
+                        tassocs = source_associations[tidx]
+                        if s in tassocs:
+                            midx = np.where(tassocs == s)[0]
+                            range_measurements[tidx] = np.delete(range_measurements[tidx], midx)
+                            source_associations[tidx] = np.delete(source_associations[tidx], midx)
+                            TOSSIT_associations[tidx] = np.delete(TOSSIT_associations[tidx], midx)
+                            break
 
         range_measurements_list.append(range_measurements)
         source_associations_list.append(source_associations)
