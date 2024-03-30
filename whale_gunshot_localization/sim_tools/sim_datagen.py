@@ -199,6 +199,7 @@ def generate_simple_paths(source_params, var, TOSSIT_locations, rng, loc0=None, 
             # calculate range measurements from all sources to TOSSIT t, adding Gaussian noise
             r = np.abs(np.linalg.norm(source_locs - TOSSIT_locations[t,:], axis=1) + \
                 rng.normal(loc=0, scale=np.sqrt(var), size=num_sources))
+            
             range_measurements.append(r)
 
             # generate arrays for the TOSSIT associations of the measuremnts.
@@ -208,7 +209,7 @@ def generate_simple_paths(source_params, var, TOSSIT_locations, rng, loc0=None, 
             source_associations.append(np.arange(num_sources))
 
         # optional delete measurements
-        if n_del is not None:
+        if n_del > 0:
             for s in range(num_sources):
                 for _ in range(n_del):
                     while True:

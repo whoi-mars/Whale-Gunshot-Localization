@@ -181,9 +181,9 @@ if __name__ == "__main__":
     # Settings #
     ############ 
     # paths
-    csv_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "missing_data_assoc_and_loc", "source_tracking_sim_results.csv")
-    stats_csv_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "missing_data_assoc_and_loc", "source_tracking_sim_stats.csv")
-    plot_path = os.path.join(PROJECT_ROOT_DIR, "experiments","results", "missing_data_assoc_and_loc")
+    csv_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "missing_data_tracking_sim", "source_tracking_sim_results.csv")
+    stats_csv_path = os.path.join(PROJECT_ROOT_DIR, "experiments", "results", "missing_data_tracking_sim", "source_tracking_sim_stats.csv")
+    plot_path = os.path.join(PROJECT_ROOT_DIR, "experiments","results", "missing_data_tracking_sim")
    
     # parameters
     seed = 1324
@@ -196,13 +196,18 @@ if __name__ == "__main__":
     #                           [-5100.,200.],
     #                           [-3800.,-2600.],
     #                           [-2000.,-3700]])
-    source_locs = np.asarray([[-5600.,200.],
-                              [-5100.,-600.],
-                              [-2800.,-1300.],
-                              [-1000.,-1000]])
-    bearings = np.asarray([-40., -45., 200., 280.])
+    # source_locs = np.asarray([[-7200.,-1600.],
+    #                         [-5000.,-1900.],
+    #                         [-1000.,-1000],
+    #                         [-4000.,-5600.]])
+    # bearings = np.asarray([-40., -45., 200., 280.])
+    source_locs = np.asarray([[-7200.,-1600.],
+                            [-5700.,-2500.],
+                            [-700.,-1000],
+                            [-4200.,-5200.]])
+    bearings = np.asarray([-37., -48., 200., 255.])
     localizer_params = dict(k={0: 4, 15: 4, 30: 4, 660: 5},
-                            multilat={i : MultilaterationOpt(method_thresh=float('inf'), seed=seed) if i < 100 else MultilaterationOpt(method_thresh=0.98, seed=seed) for i in std_list},
+                            multilat={i : MultilaterationOpt(method_thresh=float('inf'), seed=seed) for i in std_list},
                             consistency_thresh={0: 2, 15: 100, 30: 100, 660: 500},
                             TOSSIT_locations=TOSSIT_locations,
                             min_assoc_size=9)
@@ -291,55 +296,105 @@ if __name__ == "__main__":
         std_list_low = [j for j in std_list if j < 100]
 
         # box
-        c = 0
-        fig3, axs = plt.subplots(1,len(num_del_list), figsize=(10,5), sharey=True)
-        std_str_list = [str(std) for std in std_list]
-        for nd in num_del_list:
-            dft = df_long_low[df_long_low['n_delete'] == nd]
-            b = sns.boxplot(x=dft['std'], 
+        def d(inp):
+            if inp[:5] == "best_":
+                return inp[5:]
+            else:
+                return inp
+        colors = sns.color_palette("tab10")
+
+        max_del = max(num_delete)
+        fig3, spax = plt.subplots(1, len(num_delete), figsize=(15,10), sharey=True)
+        fig3.subplots_adjust(wspace=0)
+        for i in range(len(num_delete)):
+            dft = df_long_low[df_long_low['n_delete'] == num_delete[i]]
+            targets = dft['Target']
+            dft['Target'] = targets.apply(d)
+            b = sns.boxplot(x=dft['Type'], 
                             y=dft['Loc_Error'], 
-                            hue=dft['Type'],
+                            hue=dft[['Target', 'std']].apply(tuple, axis=1), 
                             showfliers=True,
                             showmeans=True,
+                            hue_order=[(f'loc_error_{k}', m) for m in std_list_low for k in range(max_sources)],
                             linewidth=1,
                             meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
-                            ax=axs[c])
-            axs[c].set_title(f"Missing Data: {np.around(((nd) / (TOSSIT_locations.shape[0]))*100, 2)}%")
-            axs[c].grid()
-            # axs[c].set_yscale('log')
-            if c == 0:
-                axs[c].set_ylabel("Median Localization Error [m]")
-            axs[c].set_xlabel("$\sigma_{r}$ [m]")
-            c += 1
+                            ax=spax[i])
+            
+            plist = list(spax[i].patches)
+            plist = [p for p in plist if "Rectangle" not in str(p)]
+            c = 0
+            for idx, p in enumerate(plist):
+                p.set_facecolor(colors[c])
+                if (idx+1) % (max_sources) == 0:
+                    c += 1
+                if (idx+1) % (len(std_list_low)*(max_sources)) == 0:
+                    c = 0
+
+            # LEGEND
+            if i < max_del - 1:
+                spax[i].legend([],[], frameon=False)
+            
+            # LABELS
+            if i+1 > 1:
+                spax[i].set_ylabel("")
+            else:
+                spax[i].set_ylabel("Localization Error [m]", fontsize=22, labelpad=20)
+            spax[i].set_xlabel(f"{np.around(100 *num_delete[i] / TOSSIT_locations.shape[0], 2)}%", fontsize=20)
+            spax[i].grid(axis='y')
+            b.tick_params(labelsize=18)
+        
+        spax[-1].legend(handles=[mpatches.Patch(color=colors[i], label="$\sigma_{r}$ = " + f"{std} m") for (i, std) in enumerate(std_list_low)], prop={'size': 14})
+        fig3.text(0.5, 0.01, 'Missing Data', ha='center', fontsize=18)
         fig3.savefig(os.path.join(plot_path, "del_analysis_box_low.png"))
 
-        c = 0
-        fig3, axs = plt.subplots(1,len(num_del_list), figsize=(10,5), sharey=True)
-        std_str_list = [str(std) for std in std_list]
-        for nd in num_del_list:
-            dft = df_long_high[df_long_high['n_delete'] == nd]
-            b = sns.boxplot(x=dft['std'], 
+        # box
+        max_del = max(num_delete)
+        fig4, spax = plt.subplots(1, len(num_delete), figsize=(15,10), sharey=True)
+        fig4.subplots_adjust(wspace=0)
+        for i in range(len(num_delete)):
+            dft = df_long_high[df_long_high['n_delete'] == num_delete[i]]
+            targets = dft['Target']
+            dft['Target'] = targets.apply(d)
+            b = sns.boxplot(x=dft['Type'], 
                             y=dft['Loc_Error'], 
-                            hue=dft['Type'],
+                            hue=dft[['Target', 'std']].apply(tuple, axis=1), 
                             showfliers=True,
                             showmeans=True,
+                            hue_order=[(f'loc_error_{k}', m) for m in std_list_high for k in range(max_sources)],
                             linewidth=1,
                             meanprops={"marker":"s","markerfacecolor":"white", "markeredgecolor":"blue"},
-                            ax=axs[c])
-            axs[c].set_title(f"Missing Data: {np.around(((nd) / (TOSSIT_locations.shape[0]))*100, 2)}%")
-            axs[c].grid(axis='y')
-            if c > 0:
-                axs[c].set_ylabel("")
-            # axs[c].set_yscale('log')
-            if c == 0:
-                axs[c].set_ylabel("Median Localization Error [m]")
-            axs[c].set_xlabel("$\sigma_{r}$ [m]")
-            c += 1
-        fig3.savefig(os.path.join(plot_path, "del_analysis_box_high.png"))
+                            ax=spax[i])
+            
+            plist = list(spax[i].patches)
+            plist = [p for p in plist if "Rectangle" not in str(p)]
+            c = 0
+            for idx, p in enumerate(plist):
+                p.set_facecolor(colors[c])
+                if (idx+1) % (max_sources) == 0:
+                    c += 1
+                if (idx+1) % (len(std_list_high)*(max_sources)) == 0:
+                    c = 0
+
+            # LEGEND
+            if i < max_del - 1:
+                spax[i].legend([],[], frameon=False)
+            
+            # LABELS
+            if i+1 > 1:
+                spax[i].set_ylabel("")
+            else:
+                spax[i].set_ylabel("Localization Error [m]", fontsize=22, labelpad=20)
+            spax[i].set_xlabel(f"{np.around(100 *num_delete[i] / TOSSIT_locations.shape[0], 2)}%", fontsize=20)
+            spax[i].grid(axis='y')
+            b.tick_params(labelsize=18)
+        
+        spax[-1].legend(handles=[mpatches.Patch(color=colors[i], label="$\sigma_{r}$ = " + f"{std} m") for (i, std) in enumerate(std_list_high)], prop={'size': 14})
+        fig4.text(0.5, 0.01, 'Missing Data', ha='center', fontsize=18)
+        fig4.savefig(os.path.join(plot_path, "del_analysis_box_high.png"))
 
         # number of sources detected
         df_high = df[df["std"] == 660]
-        fig4, axs = plt.subplots(1,len(num_delete), sharey=True)
+        fig5, axs = plt.subplots(1,len(num_delete), sharey=True)
         for c, nd in enumerate(num_delete):
             dft = df_high[df_high['n_delete'] == nd]
             counts, bins = np.histogram(dft['percent_possible_detections']*4, bins=np.arange(0,5)+0.5)
@@ -350,11 +405,11 @@ if __name__ == "__main__":
             if c == 0:
                 axs[c].set_ylabel("Number of Algorithm Runs")
             axs[c].set_xlabel("Number of Sources Detected")
-        fig4.savefig(os.path.join(plot_path, "num_sources_detected.png"))
+        fig5.savefig(os.path.join(plot_path, "num_sources_detected.png"))
 
         # number of sources detected
         df_high = df[df["std"] == 660]
-        fig4, axs = plt.subplots(1,len(num_delete), sharey=True)
+        fig6, axs = plt.subplots(1,len(num_delete), sharey=True)
         bins = np.arange(0,5)+0.5
         for c, nd in enumerate(num_delete):
             dft = df_high[df_high['n_delete'] == nd]
@@ -368,5 +423,5 @@ if __name__ == "__main__":
             if c == 0:
                 axs[c].set_ylabel("Detection Rate [%]")
             axs[c].set_xlabel("Target Number")
-        fig4.savefig(os.path.join(plot_path, "per_source_detection.png"))
+        fig6.savefig(os.path.join(plot_path, "per_source_detection.png"))
         
