@@ -1032,19 +1032,18 @@ class ParLocalizer:
                 self.H = hnx.Hypergraph(scenes)
                 assocs, locs = self.associate_and_localize(last_step=True)
 
-                if len(locs) == 0 and self.consistency_thresh <= 3000:
+                if len(locs) == 0 and self.consistency_thresh <= 2000:
                     self.consistency_thresh += 100
                     self.reset()
                     continue
 
                 return assocs, locs
-            elif self.consistency_thresh <= 3000:
+            elif self.consistency_thresh <= 2000:
                 self.consistency_thresh += 100
-
                 self.reset()
                 continue
             else:
-                return None, None
+                return [], []
 
 
     def reset(self):

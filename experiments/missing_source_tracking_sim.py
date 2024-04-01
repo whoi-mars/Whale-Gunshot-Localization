@@ -66,6 +66,9 @@ def run_simulation(source_params, std_list, TOSSIT_locations, seed, localizer_pa
                         print(f"working on (std, n_del) = ({std} m, {nd})...")
                     print(f"{step+1}/{np.max(source_params)}")
 
+                if len(source_ids) != 4:
+                    continue
+
                 # initialize results dict
                 results = {
                     "over_predict_sources": float('nan'),
@@ -130,9 +133,8 @@ def run_simulation(source_params, std_list, TOSSIT_locations, seed, localizer_pa
                     res = np.sqrt(((est_loc_combs[np.argmin(errors_matrix),:,:] - source_locs) ** 2).sum(axis=1)).flatten()
                     
                     # add error values to appropriate lists
-                    detection_idxs = est_loc_idx_combs[np.argmin(errors_matrix)] 
-                    for err, idx in zip(res, detection_idxs):
-                        loc_error_dict[f"loc_error_{source_ids[idx]}"] = err
+                    for err, sid in zip(res, source_ids):
+                        loc_error_dict[f"loc_error_{sid}"] = err
 
                     # get best localizations
                     measurements_flat = np.concatenate(range_measurements)
@@ -147,6 +149,7 @@ def run_simulation(source_params, std_list, TOSSIT_locations, seed, localizer_pa
                         'max_y' : config['scaling']['max_y'],
                     })
 
+                    detection_idxs = est_loc_idx_combs[np.argmin(errors_matrix)]
                     best_locs = []
                     for c, didx in enumerate(detection_idxs):
                         if np.isnan(locs_est[didx,:].sum()):
@@ -157,8 +160,8 @@ def run_simulation(source_params, std_list, TOSSIT_locations, seed, localizer_pa
                             best_locs.append(loc)
                     best_locs = np.asarray(best_locs)
                     best_res = np.sqrt(((best_locs - source_locs) ** 2).sum(axis=1))
-                    for err, idx in zip(best_res, detection_idxs):
-                        best_loc_error_dict[f"best_loc_error_{source_ids[idx]}"] = err
+                    for err, sid in zip(best_res, source_ids):
+                        best_loc_error_dict[f"best_loc_error_{sid}"] = err
 
                 if results["over_predict_sources"] == False:
                     save_dict = dict(zip(columns, [[localizer_params_final['multilat'].method_thresh], [len(source_locs)], [std], [results["over_predict_sources"]], [results["FN"]], [results["FP"]], [len(assocs_est) / len(possible_associations)], [nd]]))
@@ -189,9 +192,10 @@ if __name__ == "__main__":
     seed = 1324
     num_sources = 4
     source_params = [(1,50) for _ in range(num_sources)] # [(1,100), (15, 100), (25, 80), (40, 60)]
-    std_list = [0, 15, 30, 660]
+    # source_params = [(1, 200), (50, 200), (70, 170), (85, 135)]
+    std_list = [660]
     beamwidth = None
-    num_delete = [1, 2, 3]
+    num_delete = [0]
     # source_locs = np.asarray([[-5600.,1000.],
     #                           [-5100.,200.],
     #                           [-3800.,-2600.],
