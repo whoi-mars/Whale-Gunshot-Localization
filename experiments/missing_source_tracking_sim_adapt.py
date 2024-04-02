@@ -396,18 +396,22 @@ if __name__ == "__main__":
         fig4.savefig(os.path.join(plot_path, "del_analysis_box_high.png"))
 
         # number of sources detected
-        df_high = df[(df["std"] == 660) & (df_high["FP"] == False) & (df_high["FN"] == False) & (df_high["over_predict_sources"] == False)]
+        df_high = df[(df["std"] == 660) & (df["FP"] == False) & (df["FN"] == False) & (df["over_predict_sources"] == False)]
         fig5, axs = plt.subplots(1,len(num_delete), sharey=True)
         for c, nd in enumerate(num_delete):
             dft = df_high[df_high['n_delete'] == nd]
             counts, bins = np.histogram(dft['percent_possible_detections']*num_sources, bins=np.arange(0,num_sources+1)+0.5)
+            plt.sca(axs[c])
             axs[c].hist(bins[:-1], bins, weights=counts, ec='k')
             axs[c].xaxis.set_major_locator(MaxNLocator(integer=True))
             axs[c].grid(axis='y')
             axs[c].set_axisbelow(True)
             if c == 0:
-                axs[c].set_ylabel("Number of Algorithm Runs")
-            axs[c].set_xlabel("Number of Sources Detected")
+                axs[c].set_ylabel("Number of Algorithm Runs", fontsize=14)
+                plt.yticks(fontsize=14)
+            axs[c].set_xlabel("Number of Sources Detected", fontsize=10)
+            plt.xticks(fontsize=14)
+        fig5.tight_layout()
         fig5.savefig(os.path.join(plot_path, "num_sources_detected.png"))
 
         # number of sources detected
@@ -418,12 +422,16 @@ if __name__ == "__main__":
             counts = []
             for i in range(num_sources):
                 counts.append(100*np.sum(~np.isnan(dft[f'loc_error_{i}'])) / len(dft[f'loc_error_{i}']))
+            plt.sca(axs[c])
             axs[c].hist(bins[:-1], bins, weights=counts, ec='k')
             axs[c].xaxis.set_major_locator(MaxNLocator(integer=True))
             axs[c].grid(axis='y')
             axs[c].set_axisbelow(True)
             if c == 0:
-                axs[c].set_ylabel("Detection Rate [%]")
-            axs[c].set_xlabel("Target Number")
+                axs[c].set_ylabel("Detection Rate [%]", fontsize=14)
+                plt.yticks(fontsize=14)
+            axs[c].set_xlabel("Target Number", fontsize=14)
+            plt.xticks(fontsize=14)
+        fig6.tight_layout()
         fig6.savefig(os.path.join(plot_path, "per_source_detection.png"))
         

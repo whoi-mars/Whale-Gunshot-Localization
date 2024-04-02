@@ -499,8 +499,10 @@ if __name__ == "__main__":
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         ax.grid(axis='y')
         ax.set_axisbelow(True)
-        ax.set_ylabel("Number of Algorithm Runs")
-        ax.set_xlabel("Number of Sources Detected")
+        ax.set_ylabel("Number of Algorithm Runs", fontsize=14)
+        ax.set_xlabel("Number of Sources Detected", fontsize=14)
+        plt.xticks(fontsize=14)
+        plt.yticks(fontsize=14)
         fig7.savefig(os.path.join(plot_path, "num_sources_detected.png"))
 
         # number of sources detected
@@ -514,6 +516,8 @@ if __name__ == "__main__":
         ax.xaxis.set_major_locator(MaxNLocator(integer=True))
         ax.grid(axis='y')
         ax.set_axisbelow(True)
-        ax.set_ylabel("Detection Rate [%]")
-        ax.set_xlabel("Target Number")
+        ax.set_ylabel("Detection Rate [%]", fontsize=18)
+        ax.set_xlabel("Target Number", fontsize=18)
+        plt.xticks(fontsize=18)
+        plt.yticks(fontsize=18)
         fig8.savefig(os.path.join(plot_path, "per_source_detection.png"))
