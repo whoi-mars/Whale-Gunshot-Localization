@@ -1,4 +1,4 @@
-# Whale Gunshot Localization
+# Automatic Detection and Localization of an Unknown Number of Acoustic Sources
 
 A research framework for underwater acoustic source localization using machine learning and multi-sensor signal processing.
 
